@@ -1,14 +1,14 @@
 %{
 
-    #include <stdio.h>
-        #include <iostream>
-    #include "utils.hpp"
-    #include <vector>
-    
-    extern int yylex();
-    extern int yyerror(const char *s);
-    extern FILE *yyin;
-    extern int yylineno;
+#include <stdio.h>
+#include <iostream>
+#include "utils.hpp"
+#include <vector>
+
+extern int yylex();
+extern int yyerror(const char *s);
+extern FILE *yyin;
+extern int yylineno;
     
 %}
 
@@ -17,6 +17,9 @@
     long long number;
     struct variable* var;
     struct condition* cond;
+    std::vector<command*> *commands;
+    command* cmd;
+    expression* expr;
 };
 
 // Tokens
@@ -67,8 +70,10 @@
 
 %type <var> value
 %type <var> identifier
-%type <var> expression
+%type <expr> expression
 %type <cond> condition
+%type <commands> commands
+%type <cmd> command
 
 %%
 
@@ -80,24 +85,24 @@ procedures:
         |   procedures PROCEDURE proc_head IS TBEGIN commands END
         ;
 
-main:       PROGRAM IS declarations TBEGIN commands END { set_global_symbol_table(); }
+main:       PROGRAM IS declarations TBEGIN commands END { set_globals($5); }
         |   PROGRAM IS TBEGIN commands END 
         ;
 
-commands :  commands command
-        |   command
+commands :  commands command { $$ = pass_commands($1, $2); }
+        |   command { $$ = pass_commands($1); }
         ;
 
-command:    identifier ASSIGN expression SEMICOLON { create_assignment($1, $3, yylineno); }
-        |   IF condition THEN commands ELSE commands ENDIF
-        |   IF condition THEN commands ENDIF
-        |   WHILE condition DO commands ENDWHILE
+command:    identifier ASSIGN expression SEMICOLON { $$ = create_assignment($1, $3, yylineno); }
+        |   IF condition THEN commands ELSE commands ENDIF { $$ = create_if_else_statement($2, $4, $6, yylineno); }
+        |   IF condition THEN commands ENDIF { $$ = create_if_statement($2, $4, yylineno); }
+        |   WHILE condition DO commands ENDWHILE { $$ = create_while_statement($2, $4, yylineno); }
         |   REPEAT commands UNTIL condition SEMICOLON
         |   FOR pidentifier FROM value TO value DO commands ENDFOR
         |   FOR pidentifier FROM value DOWNTO value DO commands ENDFOR
         |   proc_call SEMICOLON
-        |   READ identifier SEMICOLON { create_read_statement($2, yylineno); }
-        |   WRITE value SEMICOLON { create_write_statement($2, yylineno); }
+        |   READ identifier SEMICOLON { $$ = create_read_statement($2, yylineno); }
+        |   WRITE value SEMICOLON { $$ = create_write_statement($2, yylineno); }
         ;
 
 proc_head: pidentifier LPAR formal_parameters RPAR
@@ -123,7 +128,7 @@ actual_parameters:
         |   value
         ;
 
-expression: value { $$ = $1; }
+expression: value { $$ = pass_variable_as_expression($1, yylineno); }
         |   value PLUS value { $$ = create_addition($1, $3, yylineno); }
         |   value MINUS value { $$ = create_subtraction($1, $3, yylineno); }
         |   value TIMES value {}

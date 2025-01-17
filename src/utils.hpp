@@ -13,13 +13,6 @@
 #define MAX_NUMBER LLONG_MAX
 #define MIN_NUMBER LLONG_MIN
 
-typedef enum condition_t {
-    EQ_COND,
-    NEQ_COND,
-    LT_COND,
-    LEQ_COND,
-}condition_t;
-
 struct variable {
     std::string name;
     long long int val;
@@ -27,21 +20,20 @@ struct variable {
     long long int register_number;
 };
 
-struct condition {
-    condition(struct variable* left, struct variable* right, condition_t condition);
-    struct variable* left;
-    struct variable* right;
-    condition_t condition_type;
-    bool is_precalc = false;
-    bool value = false;
-};
+typedef enum {
+    COND_EQ,
+    COND_NEQ,
+    COND_LT,
+    COND_LEQ,
+} cond_type_t;
 
-class Command {
+class command {
 public:
     virtual void generate_code() = 0;
+    int lines_taken = 0;
 };
 
-class write_statement : public Command {
+class write_statement : public command {
 public:
     write_statement(struct variable* value);
 
@@ -49,7 +41,7 @@ public:
     void generate_code();
 };
 
-class read_statement : public Command {
+class read_statement : public command {
 public:
     read_statement(struct variable* value);
 
@@ -57,30 +49,91 @@ public:
     void generate_code();
 };
 
-class if_statement : public Command {
+class condition : public command {
 public:
-    if_statement(struct condition* condition, std::vector<Command*> commands);
+    condition(struct variable* left, struct variable* right);
 
-    struct condition* condition;
-    std::vector<Command*> commands;
+    struct variable* left;
+    struct variable* right;
+
+    cond_type_t type;
+
+    void generate_code() = 0;
+};
+
+class eq_condition : public condition {
+public:
+    eq_condition(struct variable* left, struct variable* right) : condition(left, right) {}
+
+    cond_type_t type = COND_EQ;
+
     void generate_code();
 };
 
-class if_else_statement : public Command {
+class neq_condition : public condition {
 public:
-    if_else_statement(struct condition* condition, std::vector<Command*> if_commands, std::vector<Command*> else_commands);
+    neq_condition(struct variable* left, struct variable* right) : condition(left, right) {}
 
-    struct condition* condition;
-    std::vector<Command*> if_commands;
-    std::vector<Command*> else_commands;
+    cond_type_t type = COND_NEQ;
+
     void generate_code();
 };
 
-class expression : public Command {
+class lt_condition : public condition {
+public:
+    lt_condition(struct variable* left, struct variable* right) : condition(left, right) {}
+
+    cond_type_t type = COND_LT;
+
+    void generate_code();
+};
+
+class leq_condition : public condition {
+public:
+    leq_condition(struct variable* left, struct variable* right) : condition(left, right) {}
+
+    cond_type_t type = COND_LEQ;
+
+    void generate_code();
+};
+
+class if_statement : public command {
+public:
+    if_statement(struct condition* condition, std::vector<command*> *commands);
+
+    struct condition* condition;
+    std::vector<command*> *commands;
+    void generate_code();
+};
+
+class if_else_statement : public command {
+public:
+    if_else_statement(struct condition* condition, std::vector<command*> *if_commands, std::vector<command*> *else_commands);
+
+    struct condition* condition;
+    std::vector<command*> *if_commands;
+    std::vector<command*> *else_commands;
+    int if_lines_taken;
+    int else_lines_taken;
+    void generate_code();
+};
+
+class while_statement : public command {
+public:
+    while_statement(struct condition* condition, std::vector<command*> *commands);
+
+    struct condition* condition;
+    std::vector<command*> *commands;
+    void generate_code();
+};
+
+class expression : public command {
 public:
 
     struct variable* left;
     struct variable* right;
+    bool is_precalc = false;
+    long long int value = 0;
     void generate_code() = 0;
 };
 
@@ -112,13 +165,19 @@ public:
     void generate_code();
 };
 
-class assignment : public Command {
+class value_expression : public expression {
 public:
-    assignment(struct variable* left, struct variable* right, bool assigment_after_exp);
+    value_expression(struct variable* value);
+
+    void generate_code();
+};
+
+class assignment : public command {
+public:
+    assignment(struct variable* left, expression* exp);
 
     struct variable* left;
-    struct variable* right;
-    bool assigment_after_exp = false;
+    struct expression* right;
     void generate_code();
 };
 
@@ -126,24 +185,22 @@ void set_output_filename(std::string filename);
 void open_file(void);
 void close_file(void);
 
-
-
 void generate_code(void);
 
+command* create_write_statement(struct variable* value, int line_number);
+command* create_read_statement(struct variable* value, int line_number);
+command* create_assignment(struct variable* left, expression* right, int line_number);
+command* create_if_statement(struct condition* condition, std::vector<command*>* commands, int line_number);
+command* create_if_else_statement(struct condition* condition, std::vector<command*>* if_commands, std::vector<command*>* else_commands, int line_number);
 
 
-void create_write_statement(struct variable* value, int line_number);
-void create_read_statement(struct variable* value, int line_number);
-void create_assignment(struct variable* left, struct variable* right, int line_number);
 
-
-
-struct variable* create_addition(struct variable* left, struct variable* right, int line_number);
-struct variable* create_subtraction(struct variable* left, struct variable* right, int line_number);
-struct variable* create_multiplication(struct variable* left, struct variable* right, int line_number);
-struct variable* create_division(struct variable* left, struct variable* right, int line_number);
-struct variable* create_modulo(struct variable* left, struct variable* right, int line_number);
-
+expression* create_addition(struct variable* left, struct variable* right, int line_number);
+expression* create_subtraction(struct variable* left, struct variable* right, int line_number);
+expression* create_multiplication(struct variable* left, struct variable* right, int line_number);
+expression* create_division(struct variable* left, struct variable* right, int line_number);
+expression* create_modulo(struct variable* left, struct variable* right, int line_number);
+expression* pass_variable_as_expression(struct variable* value, int line_number);
 
 
 
@@ -159,9 +216,13 @@ struct variable* create_number_variable(long long int value, int line_number);
 struct variable* create_variable(std::string name, int line_number);
 
 
+std::vector<command*> *pass_commands(std::vector<command*> *commands, command* new_command);
+std::vector<command*> *pass_commands(command* new_command);
+
+
 
 void create_new_symbol_table(void);
-void set_global_symbol_table(void);
+void set_globals(std::vector<command*> *commands);
 
 
 void print_error(std::string error, int line_number);
