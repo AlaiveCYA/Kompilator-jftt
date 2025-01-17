@@ -1,0 +1,12 @@
+.vscode/
+build/
+aux_files/
+
+kompilator
+
+maszyna-wirtualna
+
+output.out
+
+test.gbl
+
