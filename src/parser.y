@@ -75,6 +75,9 @@ extern int yylineno;
 %type <commands> commands
 %type <cmd> command
 
+%left PLUS MINUS
+%left TIMES DIV MOD
+
 %%
 
 program: procedures main
@@ -97,7 +100,7 @@ command:    identifier ASSIGN expression SEMICOLON { $$ = create_assignment($1, 
         |   IF condition THEN commands ELSE commands ENDIF { $$ = create_if_else_statement($2, $4, $6, yylineno); }
         |   IF condition THEN commands ENDIF { $$ = create_if_statement($2, $4, yylineno); }
         |   WHILE condition DO commands ENDWHILE { $$ = create_while_statement($2, $4, yylineno); }
-        |   REPEAT commands UNTIL condition SEMICOLON
+        |   REPEAT commands UNTIL condition SEMICOLON { $$ = create_repeat_until_statement($2, $4, yylineno); }
         |   FOR pidentifier FROM value TO value DO commands ENDFOR
         |   FOR pidentifier FROM value DOWNTO value DO commands ENDFOR
         |   proc_call SEMICOLON
@@ -165,6 +168,7 @@ int main(int argc, char **argv) {
         std::cout << "Plik nie istnieje" << std::endl;
         return 1;
     }
+
     set_output_filename(argv[2]);
 
 	yyparse();

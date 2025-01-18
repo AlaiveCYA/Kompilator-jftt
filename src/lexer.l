@@ -63,7 +63,7 @@ void yyerror(const char *s) {
 "*" { return TIMES; }
 "/" { return DIV; }
 
-(-?[1-9][0-9]*|0) { yylval.number = atoll(yytext); return NUMBER; }
+(([1-9][0-9]*)|0) { yylval.number = atoll(yytext); return NUMBER; }
 [_a-z]+ { yylval.pidentifier = new std::string(yytext); return pidentifier; }
 
 . { printf("Unrecognized character: %s\n", yytext); }

@@ -18,6 +18,7 @@ struct variable {
     long long int val;
     var_type_t type;
     long long int register_number;
+    bool is_initialized = false;
 };
 
 typedef enum {
@@ -65,16 +66,12 @@ class eq_condition : public condition {
 public:
     eq_condition(struct variable* left, struct variable* right) : condition(left, right) {}
 
-    cond_type_t type = COND_EQ;
-
     void generate_code();
 };
 
 class neq_condition : public condition {
 public:
     neq_condition(struct variable* left, struct variable* right) : condition(left, right) {}
-
-    cond_type_t type = COND_NEQ;
 
     void generate_code();
 };
@@ -83,16 +80,12 @@ class lt_condition : public condition {
 public:
     lt_condition(struct variable* left, struct variable* right) : condition(left, right) {}
 
-    cond_type_t type = COND_LT;
-
     void generate_code();
 };
 
 class leq_condition : public condition {
 public:
     leq_condition(struct variable* left, struct variable* right) : condition(left, right) {}
-
-    cond_type_t type = COND_LEQ;
 
     void generate_code();
 };
@@ -121,6 +114,15 @@ public:
 class while_statement : public command {
 public:
     while_statement(struct condition* condition, std::vector<command*> *commands);
+
+    struct condition* condition;
+    std::vector<command*> *commands;
+    void generate_code();
+};
+
+class repeat_until_statement : public command {
+public:
+    repeat_until_statement(std::vector<command*> *commands, struct condition* condition);
 
     struct condition* condition;
     std::vector<command*> *commands;
@@ -192,6 +194,8 @@ command* create_read_statement(struct variable* value, int line_number);
 command* create_assignment(struct variable* left, expression* right, int line_number);
 command* create_if_statement(struct condition* condition, std::vector<command*>* commands, int line_number);
 command* create_if_else_statement(struct condition* condition, std::vector<command*>* if_commands, std::vector<command*>* else_commands, int line_number);
+command* create_while_statement(struct condition* condition, std::vector<command*>* commands, int line_number);
+command* create_repeat_until_statement(std::vector<command*>* commands, struct condition* condition, int line_number);
 
 
 
