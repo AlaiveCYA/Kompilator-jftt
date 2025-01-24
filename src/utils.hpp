@@ -19,6 +19,7 @@ struct variable {
     var_type_t type;
     long long int register_number;
     bool is_initialized = false;
+    bool is_iterator;
 };
 
 typedef enum {
@@ -28,10 +29,28 @@ typedef enum {
     COND_LEQ,
 } cond_type_t;
 
+typedef enum {
+    UP,
+    DOWN,
+} for_direction_t;
+
 class command {
 public:
     virtual void generate_code() = 0;
     int lines_taken = 0;
+};
+
+class procedure : public command {
+public:
+    procedure(std::string name, std::vector<formal_parameter*> *parameters);
+
+    std::string name;
+    std::vector<command*> *commands;
+    std::vector<formal_parameter*> *parameters;
+    long long int return_position;
+    long long int begining_line;
+    void generate_code();
+
 };
 
 class write_statement : public command {
@@ -129,6 +148,18 @@ public:
     void generate_code();
 };
 
+class for_statement : public command {
+public:
+    for_statement(struct variable* variable, struct variable* start, struct variable* end, std::vector<command*> *commands, for_direction_t direction);
+
+    struct variable* iterator;
+    struct variable* start;
+    struct variable* end;
+    for_direction_t direction;
+    std::vector<command*> *commands;
+    void generate_code();
+};
+
 class expression : public command {
 public:
 
@@ -183,6 +214,21 @@ public:
     void generate_code();
 };
 
+class formal_parameter {
+public:
+    std::string name;
+    var_type_t type;
+    long long int register_number;
+};
+
+class procedure_call : public command {
+public:
+    procedure_call(std::string name);
+
+    std::string name;
+    void generate_code();
+};
+
 void set_output_filename(std::string filename);
 void open_file(void);
 void close_file(void);
@@ -196,6 +242,7 @@ command* create_if_statement(struct condition* condition, std::vector<command*>*
 command* create_if_else_statement(struct condition* condition, std::vector<command*>* if_commands, std::vector<command*>* else_commands, int line_number);
 command* create_while_statement(struct condition* condition, std::vector<command*>* commands, int line_number);
 command* create_repeat_until_statement(std::vector<command*>* commands, struct condition* condition, int line_number);
+command* create_for_statement(struct variable* iterator, struct variable* start, struct variable* end, std::vector<command*>* commands, int line_number, for_direction_t direction);
 
 
 
@@ -216,8 +263,15 @@ struct condition* create_leq_condition(struct variable* left, struct variable* r
 
 
 void initialize_variable(std::string name, int line_number);
+struct variable* create_iterator(std::string name, int line_number);
 struct variable* create_number_variable(long long int value, int line_number);
 struct variable* create_variable(std::string name, int line_number);
+
+void create_parameters(std::vector<formal_parameter> *parameters, std::string name, var_type_t type, int line_number);
+std::vector<formal_parameter*> *create_parameters(std::string name, var_type_t type, int line_number);
+
+procedure* initialize_procedure(std::string name, std::vector<formal_parameter*> *parameters, int line_number);
+void create_procedure(procedure* new_procedure, std::vector<command*> *commands, int line_number);
 
 
 std::vector<command*> *pass_commands(std::vector<command*> *commands, command* new_command);

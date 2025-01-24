@@ -22,6 +22,8 @@ static std::ofstream output_file;
 
 static std::string output_filename;
 
+static long user_registers = USER_REGISTERS;
+
 void set_output_filename(std::string filename) {
     output_filename = filename;
 }
@@ -29,9 +31,8 @@ void set_output_filename(std::string filename) {
 /*************************************************************************/
 
 static std::vector<command*> global_commands = std::vector<command*>();
-static std::vector<SymbolTable*> symbol_tables = std::vector<SymbolTable*>();
+static std::vector<procedure*> procedures = std::vector<procedure*>();
 static SymbolTable* current_table = nullptr;
-static SymbolTable* global_table = nullptr;
 
 bool is_used[3] = {false, false, false};
 
@@ -44,7 +45,7 @@ void print_error(std::string error, int line_number) {
 
 void write_statement::generate_code() {
     if (value->type == VALUE) {
-        // std::cout << "generating code for write statement" << std::endl;
+
         if(value->val == 1){
             output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
         }
@@ -109,11 +110,12 @@ command* create_read_statement(struct variable* value, int line_number) {
     value->is_initialized = true;
     Symbol* symbol = current_table->get_symbol(value->name);
     if(symbol == nullptr){
-        global_table->get_symbol(value->name)->is_initialized = true;
+        print_error("Variable not declared", line_number);
     }
-    else{
-        symbol->is_initialized = true;
+    if(symbol->is_iterator){
+        print_error("Cannot read into an iterator", line_number);
     }
+    symbol->is_initialized = true;
     new_statement->lines_taken = 1;
     return new_statement;
 }
@@ -425,11 +427,12 @@ command* create_assignment(struct variable* left, expression* right, int line_nu
 
     Symbol* symbol = current_table->get_symbol(left->name);
     if(symbol == nullptr){
-        global_table->get_symbol(left->name)->is_initialized = true;
+        print_error("Variable not declared", line_number);
     }
-    else{
-        symbol->is_initialized = true;
+    if(symbol->is_iterator){
+        print_error("Cannot assign to an iterator", line_number);
     }
+    symbol->is_initialized = true;
 
     return new_assignment;
 }
@@ -633,7 +636,7 @@ condition* create_lt_condition(struct variable* left, struct variable* right, in
 }
 
 void lt_condition::generate_code(void){
-    if(left->type == VALUE && right->type == VARIABLE){
+    if(left->type == VALUE && right->type != VALUE){
         if(left->val == 1){
             output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
         }
@@ -646,10 +649,15 @@ void lt_condition::generate_code(void){
         else{
             output_file << "SET " << left->val << "\n";
         }
-        output_file << "SUB " << right->register_number << "\n";
+        if(right->type == VARIABLE){
+            output_file << "SUB " << right->register_number << "\n";
+        }
+        else if(right->type == PARAM){
+            output_file << "SUBI " << right->register_number << "\n";
+        }
         output_file << "JNEG 2" << "\n";
     }
-    else if(left->type == VARIABLE && right->type == VALUE){
+    else if(left->type != VALUE && right->type == VALUE){
         if(right->val == 1){
             output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
         }
@@ -662,12 +670,32 @@ void lt_condition::generate_code(void){
         else{
             output_file << "SET " << right->val << "\n";
         }
-        output_file << "SUB " << left->register_number << "\n";
+        if(left->type == VARIABLE){
+            output_file << "SUB " << left->register_number << "\n";
+        }
+        else if(left->type == PARAM){
+            output_file << "SUBI " << left->register_number << "\n";
+        }
         output_file << "JPOS 2" << "\n";
     }
-    else if(left->type == VARIABLE && right->type == VARIABLE){
+    else if(left->type == VARIABLE){
         output_file << "LOAD " << left->register_number << "\n";
-        output_file << "SUB " << right->register_number << "\n";
+        if(right->type == VARIABLE){
+            output_file << "SUB " << right->register_number << "\n";
+        }
+        else if(right->type == PARAM){
+            output_file << "SUBI " << right->register_number << "\n";
+        }
+        output_file << "JNEG 2" << "\n";
+    }
+    else if(left->type == PARAM){
+        output_file << "LOADI " << left->register_number << "\n";
+        if(right->type == VARIABLE){
+            output_file << "SUB " << right->register_number << "\n";
+        }
+        else if(right->type == PARAM){
+            output_file << "SUBI " << right->register_number << "\n";
+        }
         output_file << "JNEG 2" << "\n";
     }
 }
@@ -711,7 +739,7 @@ condition* create_leq_condition(struct variable* left, struct variable* right, i
 }
 
 void leq_condition::generate_code(void){
-    if(left->type == VALUE && right->type == VARIABLE){
+    if(left->type == VALUE && right->type != VALUE){
         if(left->val == 1){
             output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
         }
@@ -724,9 +752,15 @@ void leq_condition::generate_code(void){
         else{
             output_file << "SET " << left->val << "\n";
         }
-        output_file << "SUB " << right->register_number << "\n";
+
+        if(right->type == VARIABLE){
+            output_file << "SUB " << right->register_number << "\n";
+        }
+        else if(right->type == PARAM){
+            output_file << "SUBI " << right->register_number << "\n";
+        }
     }
-    else if(left->type == VARIABLE && right->type == VALUE){
+    else if(left->type != VALUE && right->type == VALUE){
         if(right->val == 1){
             output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
         }
@@ -739,11 +773,31 @@ void leq_condition::generate_code(void){
         else{
             output_file << "SET " << right->val << "\n";
         }
-        output_file << "SUB " << left->register_number << "\n";
+
+        if(left->type == VARIABLE){
+            output_file << "SUB " << left->register_number << "\n";
+        }
+        else if(left->type == PARAM){
+            output_file << "SUBI " << left->register_number << "\n";
+        }
     }
-    else if(left->type == VARIABLE && right->type == VARIABLE){
+    else if(left->type == VARIABLE){
         output_file << "LOAD " << left->register_number << "\n";
-        output_file << "SUB " << right->register_number << "\n";
+        if(right->type == VARIABLE){
+            output_file << "SUB " << right->register_number << "\n";
+        }
+        else if(right->type == PARAM){
+            output_file << "SUBI " << right->register_number << "\n";
+        }
+    }
+    else if(left->type == PARAM){
+        output_file << "LOADI " << left->register_number << "\n";
+        if(right->type == VARIABLE){
+            output_file << "SUB " << right->register_number << "\n";
+        }
+        else if(right->type == PARAM){
+            output_file << "SUBI " << right->register_number << "\n";
+        }
     }
 }
 
@@ -900,8 +954,6 @@ void if_else_statement::generate_code() {
             }
         }
 
-        output_file << "JUMP -" << lines_taken - condition->lines_taken - 2 << "\n";
-
         return;
     }
 
@@ -997,7 +1049,7 @@ void while_statement::generate_code() {
         output_file << "JUMP " << lines_taken - condition->lines_taken << "\n";
     }
     else if(condition->type == COND_LEQ){
-        if(condition->left->type == VARIABLE && condition->right->type == VALUE){
+        if(condition->left->type != VALUE && condition->right->type == VALUE){
             output_file << "JNEG " << lines_taken - condition->lines_taken << "\n";
         }
         else {
@@ -1028,7 +1080,7 @@ command* create_repeat_until_statement(std::vector<command*> *commands, struct c
     }
     
     new_repeat_until->lines_taken = condition->lines_taken + lines_taken + 1;
-    
+
     return new_repeat_until;
 }
 
@@ -1048,12 +1100,153 @@ void repeat_until_statement::generate_code() {
         output_file << "JUMP -" << lines_taken - 1 << "\n";
     }
     else if(condition->type == COND_LEQ){
-        if(condition->left->type == VARIABLE && condition->right->type == VALUE){
+        if(condition->left->type != VALUE && condition->right->type == VALUE){
             output_file << "JNEG -" << lines_taken - 1 << "\n";
         }
         else {
             output_file << "JPOS -" << lines_taken - 1 << "\n";
         }
+    }
+
+}
+
+/******************FOR***********************************/
+
+for_statement::for_statement(struct variable* variable, struct variable* start, struct variable* end, std::vector<command*> *commands, for_direction_t direction) {
+    this->iterator = variable;
+    this->start = start;
+    this->end = end;
+    this->commands = commands;
+    this->direction = direction;
+}
+
+command* create_for_statement(struct variable* iterator, struct variable* start, struct variable* end, std::vector<command*> *commands, int line_number, for_direction_t direction) {
+
+    for_statement* new_for = new for_statement(iterator, start, end, commands, direction);
+    
+    if(iterator->type == VALUE){
+        print_error("Cannot assign variable to a number", line_number);
+    }
+
+    is_used[0] = true;
+
+    if(start->type == VALUE){
+        if(start->val == -1){
+            is_used[1] = true;
+        }
+        else if(start->val == 0){
+            is_used[2] = true;
+        }
+    }
+    if(end->type == VALUE){
+        if(end->val == -1){
+            is_used[1] = true;
+        }
+        else if(end->val == 0){
+            is_used[2] = true;
+        }
+    }
+    int lines_taken = 0;
+    for(command* command : *commands){
+        lines_taken += command->lines_taken;
+    }
+    new_for->lines_taken = lines_taken + 9;
+    current_table->remove_symbol(iterator->name);
+    return new_for;
+    
+}
+
+void for_statement::generate_code(void){
+
+    if(start->type == VALUE){
+        if(start->val == 1){
+            output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
+        }
+        else if(start->val == -1){
+            output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
+        }
+        else if(start->val == 0){
+            output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
+        }
+        else{
+            output_file << "SET " << start->val << "\n";
+        }
+    }
+    else if(start->type == VARIABLE){
+        output_file << "LOAD " << start->register_number << "\n";
+    }
+    else if(start->type == PARAM){
+        output_file << "LOADI " << start->register_number << "\n";
+    }
+    output_file << "STORE " << iterator->register_number << "\n";
+
+    if(direction == UP){
+        
+        if(end->type == VALUE){
+            if(end->val == 1){
+                output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
+            }
+            else if(end->val == -1){
+                output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
+            }
+            else if(end->val == 0){
+                output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
+            }
+            else{
+                output_file << "SET " << end->val << "\n";
+            }
+        }
+        else if(end->type == VARIABLE){
+            output_file << "LOAD " << end->register_number << "\n";
+        }
+        else if(end->type == PARAM){
+            output_file << "LOADI " << end->register_number << "\n";
+        }
+        output_file << "SUB " << iterator->register_number << "\n";
+        output_file << "JNEG " << lines_taken - 4 << "\n";
+
+    }
+    else if(direction == DOWN){
+
+        if(end->type == VALUE){
+            if(end->val == 1){
+                output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
+            }
+            else if(end->val == -1){
+                output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
+            }
+            else if(end->val == 0){
+                output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
+            }
+            else{
+                output_file << "SET " << end->val << "\n";
+            }
+        }
+        else if(end->type == VARIABLE){
+            output_file << "LOAD " << end->register_number << "\n";
+        }
+        else if(end->type == PARAM){
+            output_file << "LOADI " << end->register_number << "\n";
+        }
+        output_file << "SUB " << iterator->register_number << "\n";
+        output_file << "JPOS " << lines_taken - 4 << "\n";
+    }
+
+    for(command* command : *commands){
+        command->generate_code();
+    }
+
+    if(direction == UP){
+        output_file << "LOAD " << iterator->register_number << "\n";
+        output_file << "ADD " << CONST_ONE_REGISTER << "\n";
+        output_file << "STORE " << iterator->register_number << "\n";
+        output_file << "JUMP -" << lines_taken - 2 << "\n";
+    }
+    else if(direction == DOWN){
+        output_file << "LOAD " << iterator->register_number << "\n";
+        output_file << "SUB " << CONST_ONE_REGISTER << "\n";
+        output_file << "STORE " << iterator->register_number << "\n";
+        output_file << "JUMP -" << lines_taken - 2 << "\n";
     }
 }
 
@@ -1091,17 +1284,13 @@ struct variable* create_number_variable(long long int value, int line_number) {
 }
 
 struct variable* create_variable(std::string name, int line_number) {
-    if(current_table->get_symbol(name) == nullptr && global_table->get_symbol(name) == nullptr){
+    if(current_table->get_symbol(name) == nullptr){
         print_error("Variable " + name + " not declared", line_number);
         return nullptr;
     }
     variable* new_variable = new variable();
 
     Symbol* symbol = current_table->get_symbol(name);
-
-    if(symbol == nullptr){
-        symbol = global_table->get_symbol(name);
-    }
 
     if(symbol->type == ARRAY){
         print_error("Variable " + name + " is an array", line_number);
@@ -1115,28 +1304,164 @@ struct variable* create_variable(std::string name, int line_number) {
     return new_variable;
 }
 
+/************************FORMAL PARAMETERS*************************************/
+
+std::vector<formal_parameter*> *create_parameters(std::string name, var_type_t type, int line_number) {
+    
+    if(current_table == nullptr){
+        current_table = new SymbolTable();
+    }
+    if(current_table->get_symbol(name) == nullptr){
+        if(register_counter > user_registers){
+            print_error("Out of registers", line_number);
+        }
+        Symbol* new_symbol = new Symbol(name, type, 1, 0, 0, user_registers);
+        new_symbol->is_pointer = true;
+        user_registers--;
+        current_table->add_symbol(new_symbol);
+        formal_parameter* new_parameter = new formal_parameter();
+        std::vector<formal_parameter*> *parameters = new std::vector<formal_parameter*>();
+        new_parameter->name = name;
+        new_parameter->type = type;
+        new_parameter->register_number = new_symbol->offset;
+        parameters->push_back(new_parameter);
+        return parameters;
+        
+    }
+    else{
+        print_error("Variable " + name + " already declared", line_number);
+        return nullptr;
+    }
+}
+
+std::vector<formal_parameter*> *create_parameters(std::vector<formal_parameter*> *params, std::string name, var_type_t type, int line_number) {
+    
+    if(current_table == nullptr){
+        current_table = new SymbolTable();
+    }
+    if(current_table->get_symbol(name) == nullptr){
+        if(register_counter > user_registers){
+            print_error("Out of registers", line_number);
+        }
+        Symbol* new_symbol = new Symbol(name, type, 1, 0, 0, user_registers);
+        new_symbol->is_pointer = true;
+        user_registers -= 1;
+        current_table->add_symbol(new_symbol);
+        formal_parameter* new_parameter = new formal_parameter();
+        new_parameter->name = name;
+        new_parameter->type = type;
+        new_parameter->register_number = new_symbol->offset;
+        params->push_back(new_parameter);
+        return params;
+        
+    }
+    else{
+        print_error("Variable " + name + " already declared", line_number);
+        return nullptr;
+    }
+}
+
+/******************************PROCEDURE*****************************/
+
+procedure::procedure(std::string name, std::vector<formal_parameter*> *parameters) {
+    this->name = name;
+    this->parameters = parameters;
+}
+
+procedure* initialize_procedure(std::string name, std::vector<formal_parameter*> *parameters, int line_number) {
+    
+    procedure* new_procedure = new procedure(name, parameters);
+    new_procedure->name = name;
+    new_procedure->parameters = parameters;
+
+    if(register_counter > user_registers){
+        print_error("Out of registers", line_number);
+    }
+
+    new_procedure->return_position = user_registers - 1;
+    user_registers -= 1;
+
+    procedures.push_back(new_procedure);
+    return new_procedure;
+}
+
+procedure* get_procedure(std::string name, int line_number) {
+    for(procedure* procedure : procedures){
+        if(procedure->name == name){
+            return procedure;
+        }
+    }
+    print_error("Procedure " + name + " not declared", line_number);
+    return nullptr;
+}
+
+void create_procedure(procedure* new_procedure, std::vector<command*> *commands) {
+    new_procedure->commands = commands;
+    int lines_taken = 0;
+    for(command* command : *commands){
+        lines_taken += command->lines_taken;
+    }
+    new_procedure->lines_taken = lines_taken + 1;
+
+    int offset = 0;
+
+    for (procedure* procedure : procedures) {
+        offset += procedure->lines_taken;
+    }
+
+    new_procedure->begining_line = offset + 1;
+
+    current_table = nullptr;
+}
+
+void procedure::generate_code(void) {
+
+    for(command* command : *commands){
+        command->generate_code();
+    }
+    output_file << "RTRN " << return_position << "\n";
+}
+
 /********************************COMPILER*****************************************/
 
 void generate_code(void) {
 
     output_file.open(output_filename);
 
+
     if(is_used[0]){
         output_file << "SET 1 " << "\n";
         output_file << "STORE " << CONST_ONE_REGISTER << "\n";
+
+        for(procedure* procedure : procedures){
+            procedure->begining_line += 2;
+        }
     }
     if(is_used[1]){
         output_file << "SET -1 " << "\n";
         output_file << "STORE " << CONST_MINUS_ONE_REGISTER << "\n";
+
+        for(procedure* procedure : procedures){
+            procedure->begining_line += 2;
+        }
     }
     if(is_used[2]){
         output_file << "SET 0 " << "\n";
         output_file << "STORE " << CONST_ZERO_REGISTER << "\n";
+
+        for(procedure* procedure : procedures){
+            procedure->begining_line += 2;
+        }
+    }
+
+    for(procedure* procedure : procedures){
+        procedure->generate_code();
     }
 
     for (command* command : global_commands) {
         command->generate_code();
     }
+
 }
 
 void end_program(void) {
@@ -1152,25 +1477,18 @@ void close_file() {
     output_file.close();
 }
 
-void create_new_symbol_table(void) {
-    SymbolTable* new_table = new SymbolTable();
-    symbol_tables.push_back(new_table);
-    current_table = new_table;
-}
 
 void set_globals(std::vector<command*> *commands) {
-    global_table = current_table;
     global_commands = *commands;
 }
 
 void initialize_variable(std::string name, int line_number) {
     if(current_table == nullptr){
         current_table = new SymbolTable();
-        symbol_tables.push_back(current_table);
     }
     if(current_table->get_symbol(name) == nullptr){
         Symbol* new_symbol = new Symbol(name, VARIABLE, 1, 0, 0);
-        if(new_symbol->offset + new_symbol->length - 1 > USER_REGISTERS){
+        if(new_symbol->offset + new_symbol->length - 1 > user_registers){
             print_error("Out of registers", line_number);
         }
         current_table->add_symbol(new_symbol);
@@ -1178,6 +1496,27 @@ void initialize_variable(std::string name, int line_number) {
     else{
         print_error("Variable " + name + " already declared", line_number);
     }
+}
+
+struct variable* create_iterator(std::string name, int line_number) {
+    if(current_table->get_symbol(name) == nullptr){
+        Symbol* new_symbol = new Symbol(name, VARIABLE, 1, 0, 0);
+        if(new_symbol->offset + new_symbol->length - 1 > user_registers){
+            print_error("Out of registers", line_number);
+        }
+        new_symbol->is_iterator = true;
+        current_table->add_symbol(new_symbol);
+    }
+    else{
+        print_error("Variable " + name + " already declared", line_number);
+    }
+    variable* new_variable = new variable();
+    new_variable->name = name;
+    new_variable->type = VARIABLE;
+    new_variable->register_number = current_table->get_symbol(name)->offset;
+    new_variable->is_initialized = true;
+    new_variable->is_iterator = true;
+    return new_variable;
 }
 
 
