@@ -20,14 +20,14 @@ extern int yylineno;
     std::vector<command*> *commands;
     command* cmd;
     expression* expr;
-    std::vector<variable*> *params;
+    std::vector<std::string> *params;
     std::vector<formal_parameter*> *formal_parameters;
     procedure* proc;
 };
 
 // Tokens
 
-%token <number> NUMBER
+%token <number> num
 %token PROCEDURE
 %token IS
 %token TBEGIN
@@ -81,6 +81,8 @@ extern int yylineno;
 %type <params> actual_parameters
 %type <formal_parameters> formal_parameters
 %type <proc> proc_head
+%type <cmd> proc_call
+%type <number> NUMBER
 
 %left PLUS MINUS
 %left TIMES DIV MOD
@@ -109,9 +111,9 @@ command:    identifier ASSIGN expression SEMICOLON { $$ = create_assignment($1, 
         |   IF condition THEN commands ENDIF { $$ = create_if_statement($2, $4, yylineno); }
         |   WHILE condition DO commands ENDWHILE { $$ = create_while_statement($2, $4, yylineno); }
         |   REPEAT commands UNTIL condition SEMICOLON { $$ = create_repeat_until_statement($2, $4, yylineno); }
-        |   FOR pidentifier FROM value TO { create_iterator(*$2, yylineno); } value DO commands ENDFOR { $$ = create_for_statement($<var>6, $4, $7, $9, yylineno, UP); }
-        |   FOR pidentifier FROM value DOWNTO { create_iterator(*$2, yylineno); } value DO commands ENDFOR { $$ = create_for_statement($<var>6, $4, $7, $9, yylineno, DOWN); }
-        |   proc_call SEMICOLON
+        |   FOR pidentifier FROM value TO <var>{ $$ = create_iterator(*$2, yylineno); } value DO commands ENDFOR { $$ = create_for_statement($6, $4, $7, $9, yylineno, UP); }
+        |   FOR pidentifier FROM value DOWNTO <var>{ $$ = create_iterator(*$2, yylineno); } value DO commands ENDFOR { $$ = create_for_statement($6, $4, $7, $9, yylineno, DOWN); }
+        |   proc_call SEMICOLON { $$ = $1; }
         |   READ identifier SEMICOLON { $$ = create_read_statement($2, yylineno); }
         |   WRITE value SEMICOLON { $$ = create_write_statement($2, yylineno); }
         ;
@@ -119,24 +121,24 @@ command:    identifier ASSIGN expression SEMICOLON { $$ = create_assignment($1, 
 proc_head: pidentifier LPAR formal_parameters RPAR { $$ = initialize_procedure(*$1, $3, yylineno); }
         ;
 
-proc_call: pidentifier LPAR actual_parameters RPAR
+proc_call: pidentifier LPAR actual_parameters RPAR { $$ = create_procedure_call(*$1, $3, yylineno); }
         ;
 
 declarations:   declarations COMA pidentifier { initialize_variable(*$3, yylineno); }
-        |   declarations COMA pidentifier LBRACKET NUMBER COLON NUMBER RBRACKET
+        |   declarations COMA pidentifier LBRACKET NUMBER COLON NUMBER RBRACKET { initialize_array(*$3, $5, $7, yylineno); }
         |   pidentifier { initialize_variable(*$1, yylineno); }
-        |   pidentifier LBRACKET NUMBER COLON NUMBER RBRACKET
+        |   pidentifier LBRACKET NUMBER COLON NUMBER RBRACKET { initialize_array(*$1, $3, $5, yylineno); }
 
 formal_parameters: 
-        |   formal_parameters COMA pidentifier { create_parameter(*$3, VARIABLE, yylineno); }
-        |   pidentifier { create_parameter(*$1, VARIABLE, yylineno); }
-        |   formal_parameters COMA T pidentifier { create_parameter(*$4, ARRAY, yylineno); }
-        |   T pidentifier { create_parameter(*$2, ARRAY, yylineno); }
+        |   formal_parameters COMA pidentifier { $$ = create_parameters($1, *$3, VARIABLE, yylineno); }
+        |   pidentifier { $$ = create_parameters(*$1, VARIABLE, yylineno); }
+        |   formal_parameters COMA T pidentifier { $$ = create_parameters($1, *$4, ARRAY, yylineno); }
+        |   T pidentifier { $$ = create_parameters(*$2, ARRAY, yylineno); }
         ;
 
 actual_parameters:
-        |   actual_parameters COMA value
-        |   value
+        |   actual_parameters COMA pidentifier { $$ = create_actual_parameters($1, *$3, yylineno); }
+        |   pidentifier { $$ = create_actual_parameters(*$1, yylineno); }
         ;
 
 expression: value { $$ = pass_variable_as_expression($1, yylineno); }
@@ -156,13 +158,15 @@ condition: value EQ value { $$ = create_eq_condition($1, $3, yylineno); }
         ;
 
 value:      NUMBER { $$ = create_number_variable($1, yylineno); }
-        |   MINUS NUMBER %prec UMINUS { $$ = create_number_variable(-$2, yylineno); }
         |   identifier { $$ = $1; }
         ;
 
+NUMBER:     num { $$ = $1; }
+        |   MINUS num %prec UMINUS { $$ = -$2; }
+
 identifier: pidentifier { $$ = create_variable(*$1, yylineno); }
-        |   pidentifier LBRACKET pidentifier RBRACKET
-        |  pidentifier LBRACKET NUMBER RBRACKET
+        |   pidentifier LBRACKET pidentifier RBRACKET { $$ = create_array_variable(*$1, $3, yylineno); }
+        |  pidentifier LBRACKET NUMBER RBRACKET { $$ = create_array_variable(*$1, $3, yylineno); }
         ;
 %%
 

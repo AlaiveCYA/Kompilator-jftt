@@ -1,5 +1,7 @@
 #include "symbol_table.hpp"
 
+long long int register_counter = 1;
+
 Symbol::Symbol(std::string name, var_type_t type, long long length, long long start_index, long long end_index) {
     this->name = name;
     this->type = type;
@@ -9,7 +11,9 @@ Symbol::Symbol(std::string name, var_type_t type, long long length, long long st
     this->end_index = end_index;
     this->is_initialized = false;
 
-    register_counter += length;
+    if(type != VALUE) {
+        register_counter += length;
+    }
 }
 
 Symbol::Symbol(std::string name, var_type_t type, long long length, long long start_index, long long end_index, long long offset) {
@@ -56,4 +60,12 @@ void SymbolTable::remove_symbol(std::string name) {
 
 Symbol* SymbolTable::get_last() {
     return this->symbols.back();
+}
+
+long long int get_register_counter(void) {
+    return register_counter;
+}
+
+void increment_register_counter(void) {
+    register_counter++;
 }

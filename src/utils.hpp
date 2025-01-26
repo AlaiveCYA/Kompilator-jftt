@@ -20,6 +20,7 @@ struct variable {
     long long int register_number;
     bool is_initialized = false;
     bool is_iterator;
+    bool is_pointer;
 };
 
 typedef enum {
@@ -33,6 +34,13 @@ typedef enum {
     UP,
     DOWN,
 } for_direction_t;
+
+class formal_parameter {
+public:
+    std::string name;
+    var_type_t type;
+    long long int register_number;
+};
 
 class command {
 public:
@@ -157,6 +165,7 @@ public:
     struct variable* end;
     for_direction_t direction;
     std::vector<command*> *commands;
+    long long int end_register;
     void generate_code();
 };
 
@@ -214,18 +223,14 @@ public:
     void generate_code();
 };
 
-class formal_parameter {
-public:
-    std::string name;
-    var_type_t type;
-    long long int register_number;
-};
-
 class procedure_call : public command {
 public:
-    procedure_call(std::string name);
+    procedure_call(std::string name, std::vector<variable*> *params);
 
     std::string name;
+    std::vector<variable*> *params;
+    procedure* proc;
+    long long int call;
     void generate_code();
 };
 
@@ -263,25 +268,25 @@ struct condition* create_leq_condition(struct variable* left, struct variable* r
 
 
 void initialize_variable(std::string name, int line_number);
+void initialize_array(std::string name, long long int start_index, long long int end_index, int line_number);
 struct variable* create_iterator(std::string name, int line_number);
 struct variable* create_number_variable(long long int value, int line_number);
 struct variable* create_variable(std::string name, int line_number);
 
-void create_parameters(std::vector<formal_parameter> *parameters, std::string name, var_type_t type, int line_number);
+std::vector<formal_parameter*> *create_parameters(std::vector<formal_parameter*> *parameters, std::string name, var_type_t type, int line_number);
 std::vector<formal_parameter*> *create_parameters(std::string name, var_type_t type, int line_number);
+std::vector<std::string> *create_actual_parameters(std::vector<std::string> *parameters, std::string parameter_name, int line_number);
+std::vector<std::string> *create_actual_parameters(std::string parameter_name, int line_number);
 
 procedure* initialize_procedure(std::string name, std::vector<formal_parameter*> *parameters, int line_number);
 void create_procedure(procedure* new_procedure, std::vector<command*> *commands, int line_number);
 
+command* create_procedure_call(std::string name, std::vector<std::string> *params, int line_number);
 
 std::vector<command*> *pass_commands(std::vector<command*> *commands, command* new_command);
 std::vector<command*> *pass_commands(command* new_command);
 
-
-
-void create_new_symbol_table(void);
 void set_globals(std::vector<command*> *commands);
-
 
 void print_error(std::string error, int line_number);
 void end_program(void);

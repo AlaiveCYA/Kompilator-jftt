@@ -9,13 +9,10 @@
 
 #define MAX_REGISTERS 4611686018427387903
 
-long long int register_counter = 1;
-
 typedef enum {
     VARIABLE,
     VALUE,
     ARRAY,
-    PARAM,
 } var_type_t;
 
 class Symbol {
@@ -46,5 +43,9 @@ public:
 private:
     std::vector<Symbol*> symbols;
 };
+
+long long int get_register_counter(void);
+
+void increment_register_counter(void);
 
 #endif //SYMBOL_TABLE_HPP
