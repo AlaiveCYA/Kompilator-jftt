@@ -66,5 +66,5 @@ void yyerror(const char *s) {
 (([1-9][0-9]*)|0) { yylval.number = atoll(yytext); return num; }
 [_a-z]+ { yylval.pidentifier = new std::string(yytext); return pidentifier; }
 
-. { printf("Unrecognized character: %s\n", yytext); }
+. { printf("Unrecognized character: %s in line: %d\n", yytext, yylineno); }
 %%

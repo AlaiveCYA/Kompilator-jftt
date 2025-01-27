@@ -70,7 +70,6 @@ extern int yylineno;
 %token MINUS
 %token TIMES
 %token DIV
-%token UMINUS
 
 %type <var> value
 %type <var> identifier
@@ -86,7 +85,6 @@ extern int yylineno;
 
 %left PLUS MINUS
 %left TIMES DIV MOD
-%right UMINUS
 
 %%
 
@@ -144,7 +142,7 @@ actual_parameters:
 expression: value { $$ = pass_variable_as_expression($1, yylineno); }
         |   value PLUS value { $$ = create_addition($1, $3, yylineno); }
         |   value MINUS value { $$ = create_subtraction($1, $3, yylineno); }
-        |   value TIMES value {}
+        |   value TIMES value { $$ = create_multiplication($1, $3, yylineno); }
         |   value DIV value {}
         |   value MOD value {}
         ;
@@ -162,10 +160,10 @@ value:      NUMBER { $$ = create_number_variable($1, yylineno); }
         ;
 
 NUMBER:     num { $$ = $1; }
-        |   MINUS num %prec UMINUS { $$ = -$2; }
+        |   MINUS num { $$ = -$2; }
 
 identifier: pidentifier { $$ = create_variable(*$1, yylineno); }
-        |   pidentifier LBRACKET pidentifier RBRACKET { $$ = create_array_variable(*$1, $3, yylineno); }
+        |   pidentifier LBRACKET pidentifier RBRACKET { $$ = create_array_variable(*$1, *$3, yylineno); }
         |  pidentifier LBRACKET NUMBER RBRACKET { $$ = create_array_variable(*$1, $3, yylineno); }
         ;
 %%

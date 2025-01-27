@@ -26,9 +26,11 @@ public:
     long long int length;
     long long int start_index;
     long long int end_index;
+    std::string index_variable;
     bool is_initialized = false;
     bool is_iterator;
     bool is_pointer;
+    long long int array_pointer;
 };
 
 class SymbolTable {
@@ -47,5 +49,7 @@ private:
 long long int get_register_counter(void);
 
 void increment_register_counter(void);
+
+void increment_register_counter(long long int increment);
 
 #endif //SYMBOL_TABLE_HPP

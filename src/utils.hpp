@@ -21,6 +21,9 @@ struct variable {
     bool is_initialized = false;
     bool is_iterator;
     bool is_pointer;
+    long long int index_variable_register;
+    bool is_index_variable_pointer;
+    long long int array_pointer;
 };
 
 typedef enum {
@@ -249,8 +252,6 @@ command* create_while_statement(struct condition* condition, std::vector<command
 command* create_repeat_until_statement(std::vector<command*>* commands, struct condition* condition, int line_number);
 command* create_for_statement(struct variable* iterator, struct variable* start, struct variable* end, std::vector<command*>* commands, int line_number, for_direction_t direction);
 
-
-
 expression* create_addition(struct variable* left, struct variable* right, int line_number);
 expression* create_subtraction(struct variable* left, struct variable* right, int line_number);
 expression* create_multiplication(struct variable* left, struct variable* right, int line_number);
@@ -258,20 +259,18 @@ expression* create_division(struct variable* left, struct variable* right, int l
 expression* create_modulo(struct variable* left, struct variable* right, int line_number);
 expression* pass_variable_as_expression(struct variable* value, int line_number);
 
-
-
 struct condition* create_eq_condition(struct variable* left, struct variable* right, int line_number);
 struct condition* create_neq_condition(struct variable* left, struct variable* right, int line_number);
 struct condition* create_lt_condition(struct variable* left, struct variable* right, int line_number);
 struct condition* create_leq_condition(struct variable* left, struct variable* right, int line_number);
-
-
 
 void initialize_variable(std::string name, int line_number);
 void initialize_array(std::string name, long long int start_index, long long int end_index, int line_number);
 struct variable* create_iterator(std::string name, int line_number);
 struct variable* create_number_variable(long long int value, int line_number);
 struct variable* create_variable(std::string name, int line_number);
+struct variable* create_array_variable(std::string name, long long int value, int line_number);
+struct variable* create_array_variable(std::string name, std::string index_variable, int line_number);
 
 std::vector<formal_parameter*> *create_parameters(std::vector<formal_parameter*> *parameters, std::string name, var_type_t type, int line_number);
 std::vector<formal_parameter*> *create_parameters(std::string name, var_type_t type, int line_number);

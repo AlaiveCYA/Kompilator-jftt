@@ -69,3 +69,7 @@ long long int get_register_counter(void) {
 void increment_register_counter(void) {
     register_counter++;
 }
+
+void increment_register_counter(long long int increment) {
+    register_counter += increment;
+}

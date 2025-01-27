@@ -6,13 +6,15 @@
 #include "utils.hpp"
 #include "symbol_table.hpp"
 
-#define AUX_REGISTER1 MAX_REGISTERS - 1
-#define AUX_REGISTER2 MAX_REGISTERS - 2
-#define AUX_REGISTER3 MAX_REGISTERS - 3
+#define AUX_REGISTER1 MAX_REGISTERS - 1 //ARG1
+#define AUX_REGISTER2 MAX_REGISTERS - 2 //ARG2
+#define AUX_REGISTER3 MAX_REGISTERS - 3 //RESULT
+#define AUX_REGISTER4 MAX_REGISTERS - 4 //RTRN
+#define AUX_REGISTER5 MAX_REGISTERS - 5 //FLAG1
 
-#define CONST_ONE_REGISTER MAX_REGISTERS - 4
-#define CONST_MINUS_ONE_REGISTER MAX_REGISTERS - 5
-#define CONST_ZERO_REGISTER MAX_REGISTERS - 6
+#define CONST_ONE_REGISTER MAX_REGISTERS - 6
+#define CONST_MINUS_ONE_REGISTER MAX_REGISTERS - 7
+#define CONST_ZERO_REGISTER MAX_REGISTERS - 8
 
 #define USER_REGISTERS CONST_ZERO_REGISTER - 1
 
@@ -33,10 +35,17 @@ void set_output_filename(std::string filename) {
 static std::vector<command*> global_commands = std::vector<command*>();
 static std::vector<procedure*> procedures = std::vector<procedure*>();
 static SymbolTable* current_table = nullptr;
+static std::vector<Symbol*> arrays = std::vector<Symbol*>();
 
-long int current_output_line = 0;
+long int current_output_line = 1;
 
 bool is_used[3] = {false, false, false};
+bool is_multiplication = false;
+bool is_division = false;
+bool is_modulo = false;
+long long int multiplication_begining_line = 0;
+long long int division_begining_line = 0;
+long long int modulo_begining_line = 0;
 
 void print_error(std::string error, int line_number) {
     std::cout << "Error in line: " << line_number << "\n" << error << std::endl;
@@ -68,12 +77,36 @@ void write_statement::generate_code() {
             output_file << "PUT " << value->register_number << "\n";
             current_output_line++;
         }
+        if(value->type == ARRAY){
+            output_file << "LOAD " << value->array_pointer << "\n";
+            if(value->is_index_variable_pointer){
+                output_file << "ADDI " << value->index_variable_register << "\n";
+            }
+            else{
+                output_file << "ADD " << value->index_variable_register << "\n";
+            }
+            output_file << "LOADI 0" << "\n";
+            output_file << "PUT 0" << "\n";
+            current_output_line += 4;
+        }
     }
     else {
         if(value->type == VARIABLE){
             output_file << "LOADI " << value->register_number << "\n";
             output_file << "PUT 0" << "\n";
             current_output_line += 2;
+        }
+        if(value->type == ARRAY){
+            output_file << "LOAD " << value->register_number << "\n";
+            if(value->is_index_variable_pointer){
+                output_file << "ADDI " << value->index_variable_register << "\n";
+            }
+            else{
+                output_file << "ADD " << value->index_variable_register << "\n";
+            }
+            output_file << "LOADI 0" << "\n";
+            output_file << "PUT 0" << "\n";
+            current_output_line += 4;
         }
     }
 
@@ -85,32 +118,28 @@ write_statement::write_statement(struct variable* value) {
 
 command* create_write_statement(struct variable* value, int line_number) {
     write_statement* new_statement = new write_statement(value);
-    if(value->type == VALUE){
-        if(value->val == 1){
-            is_used[0] = true;
-        }
-        else if(value->val == -1){
-            is_used[1] = true;
-        }
-        else if(value->val == 0){
-            is_used[2] = true;
-        }
-    }
-
 
     if(value->is_initialized == false){
-        print_error("Variable not initialized", line_number);
+        print_error("Variable " + value->name + " not initialized", line_number);
     }
 
     if(value->is_pointer){
-        new_statement->lines_taken = 2;
+        if(value->type == VARIABLE){
+            new_statement->lines_taken = 2;
+        }
+        else if(value->type == ARRAY){
+            new_statement->lines_taken = 4;
+        }
     }
     else{
         if(value->type == VALUE){
             new_statement->lines_taken = 2;
         }
-        else{
+        else if (value->type == VARIABLE){
             new_statement->lines_taken = 1;
+        }
+        else if(value->type == ARRAY){
+            new_statement->lines_taken = 4;
         }
     }
     return new_statement;
@@ -125,12 +154,38 @@ void read_statement::generate_code() {
             output_file << "GET " << var->register_number << "\n";
             current_output_line++;
         }
+        if(var->type == ARRAY){
+            output_file << "LOAD " << var->array_pointer << "\n";
+            if(var->is_index_variable_pointer){
+                output_file << "ADDI " << var->index_variable_register << "\n";
+            }
+            else{
+                output_file << "ADD " << var->index_variable_register << "\n";
+            }
+            output_file << "STORE " << AUX_REGISTER1 << "\n";
+            output_file << "GET 0" << "\n";
+            output_file << "STOREI " << AUX_REGISTER1 << "\n";
+            current_output_line += 5;
+        }
     }
     else{
         if(var->type == VARIABLE){
             output_file << "GET 0" << "\n";
             output_file << "STOREI " << var->register_number << "\n";
             current_output_line += 2;
+        }
+        if(var->type == ARRAY){
+            output_file << "LOAD " << var->register_number << "\n";
+            if(var->is_index_variable_pointer){
+                output_file << "ADDI " << var->index_variable_register << "\n";
+            }
+            else{
+                output_file << "ADD " << var->index_variable_register << "\n";
+            }
+            output_file << "STORE " << AUX_REGISTER1 << "\n";
+            output_file << "GET 0" << "\n";
+            output_file << "STOREI " << AUX_REGISTER1 << "\n";
+            current_output_line += 5;
         }
     }
 }
@@ -157,10 +212,20 @@ command* create_read_statement(struct variable* value, int line_number) {
 
     symbol->is_initialized = true;
     if(value->is_pointer){
-        new_statement->lines_taken = 2;
+        if(value->type == VARIABLE){
+            new_statement->lines_taken = 2;
+        }
+        else if(value->type == ARRAY){
+            new_statement->lines_taken = 5;
+        }
     }
     else{
-        new_statement->lines_taken = 1;
+        if(value->type == VARIABLE){
+            new_statement->lines_taken = 1;
+        }
+        else if(value->type == ARRAY){
+            new_statement->lines_taken = 5;
+        }
     }
     return new_statement;
 }
@@ -174,7 +239,7 @@ addition::addition(struct variable* left, struct variable* right) {
 
 void addition::generate_code() {
 
-    if(left->type == VALUE && right->type == VALUE){
+    if(left->type == VALUE && right->type == VALUE && is_precalc){
         if(left->val + right->val == 1){
             output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
         }
@@ -191,103 +256,97 @@ void addition::generate_code() {
         return;
     }
 
-    if(!left->is_pointer){
-
-        if(left->type == VALUE){
-            if(left->val == 1){
-                output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
-            }
-            else if(left->val == -1){
-                output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
-            }
-            else if(left->val == 0){
-                output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
-            }
-            else{
-                output_file << "SET " << left->val << "\n";
-            }
+    if(left->type == VARIABLE){
+        if(left->is_pointer){
+            output_file << "LOADI " << left->register_number << "\n";
             current_output_line++;
-            if(right->is_pointer){
-                if(right->type == VARIABLE){
-                    output_file << "ADDI " << right->register_number << "\n";
-                    current_output_line++;
-                }
-            }
-            else{
-                if(right->type == VARIABLE){
-                    output_file << "ADD " << right->register_number << "\n";
-                    current_output_line++;
-                }
-            }
-        }
-        else if(left->type == VARIABLE){
-
-            if(right->type == VALUE){
-                if(right->val == 1){
-                    output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
-                }
-                else if(right->val == -1){
-                    output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
-                }
-                else if(right->val == 0){
-                    output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
-                }
-                else{
-                    output_file << "SET " << right->val << "\n";
-                }
-                output_file << "ADD " << left->register_number << "\n";
-                current_output_line += 2;
-            }
-            if(right->is_pointer){
-                if(right->type == VARIABLE){
-                    output_file << "LOAD " << left->register_number << "\n";
-                    output_file << "ADDI " << right->register_number << "\n";
-                    current_output_line += 2;
-                }
-            }
-            else{
-                if(right->type == VARIABLE){
-                    output_file << "LOAD " << left->register_number << "\n";
-                    output_file << "ADD " << right->register_number << "\n";
-                    current_output_line += 2;
-                }
-            }
-        }
-    }
-    else{
-        if(right->type == VALUE){
-            if(right->val == 1){
-                output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
-            }
-            else if(right->val == -1){
-                output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
-            }
-            else if(right->val == 0){
-                output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
-            }
-            else{
-                output_file << "SET " << right->val << "\n";
-            }
-            current_output_line++;
-            if(left->type == VARIABLE){
-                output_file << "ADDI " << left->register_number << "\n";
-                current_output_line++;
-            }
-        }
-        if(right->is_pointer){
-            if(right->type == VARIABLE){
-                output_file << "LOADI " << left->register_number << "\n";
-                output_file << "ADDI " << right->register_number << "\n";
-                current_output_line += 2;
-            }
         }
         else{
-            if(right->type == VARIABLE){
-                output_file << "LOADI " << left->register_number << "\n";
-                output_file << "ADD " << right->register_number << "\n";
-                current_output_line += 2;
-            }
-        }   
+            output_file << "LOAD " << left->register_number << "\n";
+            current_output_line++;
+        }
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line++;
+    }
+    else if (left->type == VALUE){
+        if(left->val == 1){
+            output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
+        }
+        else if(left->val == -1){
+            output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
+        }
+        else if(left->val == 0){
+            output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
+        }
+        else{
+            output_file << "SET " << left->val << "\n";
+        }
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line += 2;
+    }
+    else if(left->type == ARRAY){
+        if(left->is_pointer){
+            output_file << "LOAD " << left->register_number << "\n";
+        }
+        else{
+            output_file << "LOAD " << left->array_pointer << "\n";
+        }
+        if(left->is_index_variable_pointer){
+            output_file << "ADDI " << left->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << left->index_variable_register << "\n";
+        }
+        output_file << "LOADI 0" << "\n";
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line += 4;
+    }
+
+    if(right->type == VARIABLE){
+        if(right->is_pointer){
+            output_file << "LOADI " << right->register_number << "\n";
+            current_output_line++;
+        }
+        else{
+            output_file << "LOAD " << right->register_number << "\n";
+            current_output_line++;
+        }
+        output_file << "ADD " << AUX_REGISTER1 << "\n";
+        current_output_line++;
+    }
+    else if (right->type == VALUE){
+        if(right->val == 1){
+            output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
+        }
+        else if(right->val == -1){
+            output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
+        }
+        else if(right->val == 0){
+            output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
+        }
+        else{
+            output_file << "SET " << right->val << "\n";
+        }
+        current_output_line++;
+        output_file << "ADD " << AUX_REGISTER1 << "\n";
+        current_output_line++;
+    }
+    else if(right->type == ARRAY){
+        if(right->is_pointer){
+            output_file << "LOAD " << right->register_number << "\n";
+        }
+        else{
+            output_file << "LOAD " << right->array_pointer<< "\n";
+        }
+        if(right->is_index_variable_pointer){
+            output_file << "ADDI " << right->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << right->index_variable_register << "\n";
+        }
+        output_file << "LOADI 0" << "\n";
+        output_file << "ADD " << AUX_REGISTER1 << "\n";
+        current_output_line += 4;
     }
 }
 
@@ -295,58 +354,50 @@ expression* create_addition(struct variable* left, struct variable* right, int l
     addition* new_addition = new addition(left, right);
     if (left->type == VALUE && right->type == VALUE) {
         if(left->val >= 0 && MAX_NUMBER - left->val < right->val){
-            print_error("Number overflow", line_number);
+            new_addition->is_precalc = false;
         }
         else if(left->val < 0 && MIN_NUMBER - left->val > right->val){
-            print_error("Number overflow", line_number);
+            new_addition->is_precalc = false;
         }
-
-        if(left->val + right->val == 1){
-            is_used[0] = true;
-        }
-        else if(left->val + right->val == -1){
-            is_used[1] = true;
-        }
-        else if(left->val + right->val == 0){
-            is_used[2] = true;
+        else{
+            new_addition->is_precalc = true;
         }
     }
     else{
-
-        if(left->type == VALUE){
-            if(left->val == 1){
-                is_used[0] = true;
-            }
-            else if(left->val == -1){
-                is_used[1] = true;
-            }
-            else if(left->val == 0){
-                is_used[2] = true;
-            }
+        if(left->is_initialized == false){
+            print_error("Variable " + left->name + " not initialized", line_number);
         }
-        else if(right->type == VALUE){
-            if(right->val == 1){
-                is_used[0] = true;
-            }
-            else if(right->val == -1){
-                is_used[1] = true;
-            }
-            else if(right->val == 0){
-                is_used[2] = true;
-            }
-        }
-        if(left->is_initialized == false || right->is_initialized == false){
-            print_error("Variable not initialized", line_number);
-        }
-
-        if(left->type == VALUE && right->type == VALUE){
-            new_addition->lines_taken = 1;
-        }
-        else{
-            new_addition->lines_taken = 2;
+        if(right->is_initialized == false){
+            print_error("Variable " + right->name + " not initialized", line_number);
         }
     }
+
+    int lines_taken = 0;
+
+    if(left->type == VALUE && right->type == VALUE && new_addition->is_precalc){
+        lines_taken = 1;
+    }
+    else if (left->type == VARIABLE){
+        lines_taken += 2;
+    }
+    else if (left->type == ARRAY){
+        lines_taken += 4;
+    }
+    else if (left->type == VALUE && !new_addition->is_precalc){
+        lines_taken += 2;
+    }
+
+    if(right->type == VARIABLE){
+        lines_taken += 2;
+    }
+    else if (right->type == ARRAY){
+        lines_taken += 4;
+    }
+    else if (right->type == VALUE && !new_addition->is_precalc){
+        lines_taken += 2;
+    }
     
+    new_addition->lines_taken = lines_taken;
     return new_addition;
 }
 
@@ -358,7 +409,8 @@ subtraction::subtraction(struct variable* left, struct variable* right) {
 }
 
 void subtraction::generate_code() {
-   if(left->type == VALUE && right->type == VALUE){
+
+   if(left->type == VALUE && right->type == VALUE && is_precalc){
         if(left->val - right->val == 1){
             output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
         }
@@ -375,107 +427,97 @@ void subtraction::generate_code() {
         return;
     }
 
-    if(!left->is_pointer){
-
-        if(left->type == VALUE){
-            if(left->val == 1){
-                output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
-            }
-            else if(left->val == -1){
-                output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
-            }
-            else if(left->val == 0){
-                output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
-            }
-            else{
-                output_file << "SET " << left->val << "\n";
-            }
-            current_output_line++;
-            if(right->is_pointer){
-                if(right->type == VARIABLE){
-                    output_file << "SUBI " << right->register_number << "\n";
-                    current_output_line++;
-                }
-            }
-            else{
-                if(right->type == VARIABLE){
-                    output_file << "SUB " << right->register_number << "\n";
-                    current_output_line++;
-                }
-            }
-        }
-        else if(left->type == VARIABLE){
-
-            if(right->type == VALUE){
-                if(right->val == 1){
-                    output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
-                    current_output_line++;
-                }
-                else if(right->val == -1){
-                    output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
-                    current_output_line++;
-                }
-                else if(right->val == 0){
-                    output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
-                    current_output_line++;
-                }
-                else{
-                    output_file << "SET -" << right->val << "\n";
-                    current_output_line++;
-                }
-                output_file << "ADD " << left->register_number << "\n";
-                current_output_line++;
-            }
-            if(right->is_pointer){
-                if(right->type == VARIABLE){
-                    output_file << "LOAD " << left->register_number << "\n";
-                    output_file << "SUBI " << right->register_number << "\n";
-                    current_output_line += 2;
-                }
-            }
-            else{
-                if(right->type == VARIABLE){
-                    output_file << "LOAD " << left->register_number << "\n";
-                    output_file << "SUB " << right->register_number << "\n";
-                    current_output_line += 2;
-                }
-            }
-        }
-    }
-    else{
-        if(right->type == VALUE){
-            if(right->val == 1){
-                output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
-            }
-            else if(right->val == -1){
-                output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
-            }
-            else if(right->val == 0){
-                output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
-            }
-            else{
-                output_file << "SET -" << right->val << "\n";
-            }
-            current_output_line++;
-            if(left->type == VARIABLE){
-                output_file << "ADDI " << left->register_number << "\n";
-                current_output_line++;
-            }
-        }
+    if(right->type == VARIABLE){
         if(right->is_pointer){
-            if(right->type == VARIABLE){
-                output_file << "LOADI " << left->register_number << "\n";
-                output_file << "SUBI " << right->register_number << "\n";
-                current_output_line += 2;
-            }
+            output_file << "LOADI " << right->register_number << "\n";
+            current_output_line++;
         }
         else{
-            if(right->type == VARIABLE){
-                output_file << "LOADI " << left->register_number << "\n";
-                output_file << "SUB " << right->register_number << "\n";
-                current_output_line += 2;
-            }
-        }   
+            output_file << "LOAD " << right->register_number << "\n";
+            current_output_line++;
+        }
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line++;
+    }
+    else if (right->type == VALUE){
+        if(right->val == 1){
+            output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
+        }
+        else if(right->val == -1){
+            output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
+        }
+        else if(right->val == 0){
+            output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
+        }
+        else{
+            output_file << "SET " << right->val << "\n";
+        }
+        current_output_line++;
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line++;
+    }
+    else if(right->type == ARRAY){
+        if(right->is_pointer){
+            output_file << "LOAD " << right->register_number << "\n";
+        }
+        else{
+            output_file << "LOAD " << right->array_pointer << "\n";
+        }
+        if(right->is_index_variable_pointer){
+            output_file << "ADDI " << right->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << right->index_variable_register << "\n";
+        }
+        output_file << "LOADI 0" << "\n";
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line += 4;
+    }
+
+    if(left->type == VARIABLE){
+        if(left->is_pointer){
+            output_file << "LOADI " << left->register_number << "\n";
+            current_output_line++;
+        }
+        else{
+            output_file << "LOAD " << left->register_number << "\n";
+            current_output_line++;
+        }
+        output_file << "SUB " << AUX_REGISTER1 << "\n";
+        current_output_line++;
+    }
+    else if (left->type == VALUE){
+        if(left->val == 1){
+            output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
+        }
+        else if(left->val == -1){
+            output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
+        }
+        else if(left->val == 0){
+            output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
+        }
+        else{
+            output_file << "SET " << left->val << "\n";
+        }
+        output_file << "SUB " << AUX_REGISTER1 << "\n";
+        current_output_line += 2;
+    }
+    else if(left->type == ARRAY){
+        if(left->is_pointer){
+            output_file << "LOAD " << left->register_number << "\n";
+        }
+        else{
+            output_file << "LOAD " << left->array_pointer << "\n";
+        }
+        if(left->is_index_variable_pointer){
+            output_file << "ADDI " << left->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << left->index_variable_register << "\n";
+        }
+        output_file << "LOADI 0" << "\n";
+        output_file << "SUB " << AUX_REGISTER1 << "\n";
+        current_output_line += 4;
     }
 }
 
@@ -484,57 +526,252 @@ expression* create_subtraction(struct variable* left, struct variable* right, in
     subtraction* new_subtraction = new subtraction(left, right);
     if (left->type == VALUE && right->type == VALUE) {
         if(left->val >= 0 && MAX_NUMBER + left->val < right->val){
-            print_error("Number overflow", line_number);
+            new_subtraction->is_precalc = false;
         }
         else if(left->val < 0 && MIN_NUMBER + left->val > right->val){
-            print_error("Number overflow", line_number);
+            new_subtraction->is_precalc = false;
         }
-
-        if(left->val - right->val == 1){
-            is_used[0] = true;
+        else{
+            new_subtraction->is_precalc = true;
         }
-        else if(left->val - right->val == -1){
-            is_used[1] = true;
-
-        }
-        else if(left->val - right->val == 0){
-            is_used[2] = true;
-        }
-
-        new_subtraction->lines_taken = 1;
     }
     else{
-
-        if(left->type == VALUE){
-            if(left->val == 1){
-                is_used[0] = true;
-            }
-            else if(left->val == -1){
-                is_used[1] = true;
-            }
-            else if(left->val == 0){
-                is_used[2] = true;
-            }
+        if(left->is_initialized == false){
+            print_error("Variable " + left->name + " not initialized", line_number);
         }
-        else if(right->type == VALUE){
-            if(right->val == 1){
-                is_used[1] = true;
-            }
-            else if(right->val == -1){
-                is_used[0] = true;
-            }
-            else if(right->val == 0){
-                is_used[2] = true;
-            }
+        if(right->is_initialized == false){
+            print_error("Variable " + right->name + " not initialized", line_number);
         }
-
-        if(left->is_initialized == false || right->is_initialized == false){
-            print_error("Variable not initialized", line_number);
-        }
-
-        new_subtraction->lines_taken = 2;
     }
+
+    int lines_taken = 0;
+
+     if(left->type == VALUE && right->type == VALUE && new_subtraction->is_precalc){
+        lines_taken = 1;
+    }
+    else if (left->type == VARIABLE){
+        lines_taken += 2;
+    }
+    else if (left->type == ARRAY){
+        lines_taken += 4;
+    }
+    else if (left->type == VALUE && !new_subtraction->is_precalc){
+        lines_taken += 2;
+    }
+
+    if(right->type == VARIABLE){
+        lines_taken += 2;
+    }
+    else if (right->type == ARRAY){
+        lines_taken += 4;
+    }
+    else if (right->type == VALUE && !new_subtraction->is_precalc){
+        lines_taken += 2;
+    }
+
+    new_subtraction->lines_taken = lines_taken;
+
     return new_subtraction;
+}
+
+/*********************MULTIPLICATION*************************/
+
+multiplication::multiplication(struct variable* left, struct variable* right) {
+    this->left = left;
+    this->right = right;
+}
+
+expression* create_multiplication(struct variable* left, struct variable* right, int line_number) {
+    multiplication* new_multiplication = new multiplication(left, right);
+
+    if(left->is_initialized == false){
+        print_error("Variable " + left->name + " not initialized", line_number);
+    }
+    if(right->is_initialized == false){
+        print_error("Variable " + right->name + " not initialized", line_number);
+    }
+
+    int lines_taken = 0;
+
+    if(left->type == VALUE && right->type == VALUE){
+        if(left->val == 0 || right->val == 0){
+            new_multiplication->is_precalc = true;
+        }
+        else if(left->val == 1){
+            new_multiplication->is_precalc = true;
+            new_multiplication->value = right->val;
+        }
+        else if(right->val == 1){
+            new_multiplication->is_precalc = true;
+            new_multiplication->value = left->val;
+        }
+        else if(left->val == -1){
+            new_multiplication->is_precalc = true;
+            new_multiplication->value = -right->val;
+        }
+        else if(right->val == -1){
+            new_multiplication->is_precalc = true;
+            new_multiplication->value = -left->val;
+        }
+        else{
+            new_multiplication->is_precalc = false;
+            is_multiplication = true;
+        }
+    }
+    else{
+        new_multiplication->is_precalc = false;
+        is_multiplication = true;
+    }
+
+    if(left->type == VALUE && right->type == VALUE && new_multiplication->is_precalc){
+        lines_taken = 1;
+    }
+    else if (left->type == VARIABLE){
+        lines_taken += 2;
+    }
+    else if (left->type == ARRAY){
+        lines_taken += 4;
+    }
+    else if (left->type == VALUE && !new_multiplication->is_precalc){
+        lines_taken += 2;
+    }
+
+    if(right->type == VARIABLE){
+        lines_taken += 2;
+    }
+    else if (right->type == ARRAY){
+        lines_taken += 4;
+    }
+    else if (right->type == VALUE && !new_multiplication->is_precalc){
+        lines_taken += 2;
+    }
+
+    is_used[0] = true;
+    is_used[2] = true;
+
+    new_multiplication->lines_taken = lines_taken + 3;
+
+    return new_multiplication;
+}
+
+void multiplication::generate_code() {
+
+    if(left->type == VALUE && right->type == VALUE && is_precalc){
+        if(value == 1){
+            output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
+        }
+        else if(value == -1){
+            output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
+        }
+        else if(value == 0){
+            output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
+        }
+        else{
+            output_file << "SET " << value << "\n";
+        }
+        current_output_line++;
+        return;
+    }
+
+    if(left->type == VARIABLE){
+        if(left->is_pointer){
+            output_file << "LOADI " << left->register_number << "\n";
+            current_output_line++;
+        }
+        else{
+            output_file << "LOAD " << left->register_number << "\n";
+            current_output_line++;
+        }
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line++;
+    }
+    else if (left->type == VALUE){
+        if(left->val == 1){
+            output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
+        }
+        else if(left->val == -1){
+            output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
+        }
+        else if(left->val == 0){
+            output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
+        }
+        else{
+            output_file << "SET " << left->val << "\n";
+        }
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line += 2;
+    }
+    else if(left->type == ARRAY){
+        if(left->is_pointer){
+            output_file << "LOAD " << left->register_number << "\n";
+        }
+        else{
+            output_file << "LOAD " << left->array_pointer << "\n";
+        }
+        if(left->is_index_variable_pointer){
+            output_file << "ADDI " << left->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << left->index_variable_register << "\n";
+        }
+        output_file << "LOADI 0" << "\n";
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line += 4;
+    }
+
+    if(right->type == VARIABLE){
+        if(right->is_pointer){
+            output_file << "LOADI " << right->register_number << "\n";
+            current_output_line++;
+        }
+        else{
+            output_file << "LOAD " << right->register_number << "\n";
+            current_output_line++;
+        }
+        output_file << "STORE " << AUX_REGISTER2 << "\n";
+        current_output_line++;
+    }
+    else if (right->type == VALUE){
+        if(right->val == 1){
+            output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
+        }
+        else if(right->val == -1){
+            output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
+        }
+        else if(right->val == 0){
+            output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
+        }
+        else{
+            output_file << "SET " << right->val << "\n";
+        }
+        current_output_line++;
+        output_file << "STORE " << AUX_REGISTER2 << "\n";
+        current_output_line++;
+    }
+    else if(right->type == ARRAY){
+        if(right->is_pointer){
+            output_file << "LOAD " << right->register_number << "\n";
+        }
+        else{
+            output_file << "LOAD " << right->array_pointer << "\n";
+        }
+        if(right->is_index_variable_pointer){
+            output_file << "ADDI " << right->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << right->index_variable_register << "\n";
+        }
+        output_file << "LOADI 0" << "\n";
+        output_file << "STORE " << AUX_REGISTER2 << "\n";
+        current_output_line += 4;
+    }
+
+    output_file << "SET " << current_output_line + 2 << "\n";
+    current_output_line++;
+    output_file << "STORE " << AUX_REGISTER4 << "\n";
+    current_output_line++;
+    output_file << "JUMP " << multiplication_begining_line - current_output_line + 2 << "\n";
+    current_output_line++;
 }
 
 /****************VALUE EXP********************/
@@ -559,38 +796,45 @@ void value_expression::generate_code() {
         }
         current_output_line++;
     }
-    else if(left->is_pointer){
-        if(left->type == VARIABLE){
+    else if(left->type == VARIABLE){
+        if(left->is_pointer){
             output_file << "LOADI " << left->register_number << "\n";
-            current_output_line++;
         }
-    }
-    else{
-        if(left->type == VARIABLE){
+        else{
             output_file << "LOAD " << left->register_number << "\n";
-            current_output_line++;
         }
+        current_output_line++;
+    }
+    else if(left->type == ARRAY){
+        if(left->is_pointer){
+            output_file << "LOAD " << left->register_number << "\n";
+        }
+        else{
+            output_file << "LOAD " << left->array_pointer << "\n";
+        }
+        if(left->is_index_variable_pointer){
+            output_file << "ADDI " << left->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << left->index_variable_register << "\n";
+        }
+        output_file << "LOADI 0" << "\n";
+        current_output_line += 3;
     }
 }
 
 expression* pass_variable_as_expression(struct variable* value, int line_number) {
     value_expression* new_value = new value_expression(value);
-    new_value->lines_taken = 1;
-
-    if(value->type == VALUE){
-        if(value->val == 1){
-            is_used[0] = true;
-        }
-        else if(value->val == -1){
-            is_used[1] = true;
-        }
-        else if(value->val == 0){
-            is_used[2] = true;
-        }
+    
+    if(value->type == ARRAY){
+        new_value->lines_taken = 3;
+    }
+    else {
+        new_value->lines_taken = 1;
     }
 
     if(value->is_initialized == false){
-        print_error("Variable not initialized", line_number);
+        print_error("Variable " + value->name + " not initialized", line_number);
     }
 
     return new_value;
@@ -607,17 +851,35 @@ void assignment::generate_code() {
 
     right->generate_code();
 
-    if(left->is_pointer){
-        if(left->type == VARIABLE){
+    if(left->type == VARIABLE){
+        if(left->is_pointer){
             output_file << "STOREI " << left->register_number << "\n";
-            current_output_line++;
         }
-    }
-    else{
-        if(left->type == VARIABLE){
+        else{
             output_file << "STORE " << left->register_number << "\n";
-            current_output_line++;
         }
+        current_output_line++;
+    }
+    else if(left->type == ARRAY){
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line++;
+        if(left->is_pointer){
+            output_file << "LOAD " << left->register_number << "\n";
+        }
+        else{
+            output_file << "LOAD " << left->array_pointer << "\n";
+        }
+        current_output_line++;
+        if(left->is_index_variable_pointer){
+            output_file << "ADDI " << left->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << left->index_variable_register << "\n";
+        }
+        output_file << "STORE " << AUX_REGISTER2 << "\n";
+        output_file << "LOAD " << AUX_REGISTER1 << "\n";
+        output_file << "STOREI " << AUX_REGISTER2 << "\n";
+        current_output_line += 4;
     }
 }
 
@@ -626,7 +888,15 @@ command* create_assignment(struct variable* left, expression* right, int line_nu
         print_error("Cannot assign variable to a number", line_number);
     }
     assignment* new_assignment = new assignment(left, right);
-    new_assignment->lines_taken = right->lines_taken + 1;
+    
+    if(left->type == ARRAY){
+        new_assignment->lines_taken = 6;
+    }
+    else{
+        new_assignment->lines_taken = 1;
+    }
+
+    new_assignment->lines_taken += right->lines_taken;
 
     left->is_initialized = true;
 
@@ -654,41 +924,45 @@ condition* create_eq_condition(struct variable* left, struct variable* right, in
 
     eq_condition* new_condition = new eq_condition(left, right);
 
-    new_condition->lines_taken = 3;
+    int lines_taken = 1;
+    
+    if(left->type == VALUE){
+        lines_taken+=2;
+    }
+    else if(left->type == VARIABLE){
+        lines_taken+=2;
+    }
+    else if(left->type == ARRAY){
+        lines_taken += 4;
+    }
+
+    if(right->type == VALUE){
+        lines_taken+=2;
+    }
+    else if(right->type == VARIABLE){
+        lines_taken+=2;
+    }
+    else if(right->type == ARRAY){
+        lines_taken += 4;
+    }
+
+    new_condition->lines_taken = lines_taken;
+
     new_condition->type = COND_EQ;
 
-    if(left->type == VALUE){
-        if(left->val == 1){
-            is_used[0] = true;
-        }
-        else if(left->val == -1){
-            is_used[1] = true;
-        }
-        else if(left->val == 0){
-            is_used[2] = true;
-        }
+    if(left->is_initialized == false){
+        print_error("Variable " + left->name + " not initialized", line_number);
     }
-    else if(right->type == VALUE){
-        if(right->val == 1){
-            is_used[0] = true;
-        }
-        else if(right->val == -1){
-            is_used[1] = true;
-        }
-        else if(right->val == 0){
-            is_used[2] = true;
-        }
-    }
-
-    if(left->is_initialized == false || right->is_initialized == false){
-        print_error("Variable not initialized", line_number);
+    if(right->is_initialized == false){
+        print_error("Variable " + right->name + " not initialized", line_number);
     }
 
     return new_condition;
 }
 
 void eq_condition::generate_code() {
-    if (left->type == VALUE && right->type != VALUE) {
+    
+    if (left->type == VALUE) {
         if(left->val == 1){
             output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
         }
@@ -702,22 +976,40 @@ void eq_condition::generate_code() {
             output_file << "SET " << left->val << "\n";
         }
         current_output_line++;
-        if(right->is_pointer){
-            if(right->type == VARIABLE){
-                output_file << "SUBI " << right->register_number << "\n";
-                current_output_line++;
-            }
-        }
-        else{
-            if(right->type == VARIABLE){
-                output_file << "SUB " << right->register_number << "\n";
-                current_output_line++;
-            }
-        }
-        output_file << "JZERO 2" << "\n";
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
         current_output_line++;
     }
-    else if (left->type != VALUE && right->type == VALUE) {
+    else if (left->type == VARIABLE) {
+        if(left->is_pointer){
+            output_file << "LOADI " << left->register_number << "\n";
+            current_output_line++;
+        }
+        else{
+            output_file << "LOAD " << left->register_number << "\n";
+            current_output_line++;
+        }
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line++;
+    }
+    else if (left->type == ARRAY) {
+        if(left->is_pointer){
+            output_file << "LOAD " << left->register_number << "\n";
+        }
+        else{
+            output_file << "LOAD " << left->array_pointer << "\n";
+        }
+        if(left->is_index_variable_pointer){
+            output_file << "ADDI " << left->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << left->index_variable_register << "\n";
+        }
+        output_file << "LOADI 0" << "\n";
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line += 4;
+    }
+
+    if (right->type == VALUE) {
         if(right->val == 1){
             output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
         }
@@ -731,61 +1023,41 @@ void eq_condition::generate_code() {
             output_file << "SET " << right->val << "\n";
         }
         current_output_line++;
-        if(left->is_pointer){
-            if(left->type == VARIABLE){
-                output_file << "SUBI " << left->register_number << "\n";
-                current_output_line++;
-            }
-        }
-        else{
-            if(left->type == VARIABLE){
-                output_file << "SUB " << left->register_number << "\n";
-                current_output_line++;
-            }
-        }
-        output_file << "JZERO 2" << "\n";
+        output_file << "SUB " << AUX_REGISTER1 << "\n";
         current_output_line++;
     }
-    else if(left->is_pointer){
-        if(left->type == VARIABLE){
-            output_file << "LOADI " << left->register_number << "\n";
+    else if (right->type == VARIABLE) {
+        if(right->is_pointer){
+            output_file << "LOADI " << right->register_number << "\n";
             current_output_line++;
         }
-        if(right->is_pointer){
-            if(right->type == VARIABLE){
-                output_file << "SUBI " << right->register_number << "\n";
-                current_output_line++;
-            }
-        }
         else{
-            if(right->type == VARIABLE){
-                output_file << "SUB " << right->register_number << "\n";
-                current_output_line++;
-            }
-        }
-        output_file << "JZERO 2" << "\n";
-        current_output_line++;
-    }
-    else{
-        if(left->type == VARIABLE){
-            output_file << "LOAD " << left->register_number << "\n";
+            output_file << "LOAD " << right->register_number << "\n";
             current_output_line++;
         }
-        if(right->is_pointer){
-            if(right->type == VARIABLE){
-                output_file << "SUBI " << right->register_number << "\n";
-                current_output_line++;
-            }
-        }
-        else{
-            if(right->type == VARIABLE){
-                output_file << "SUB " << right->register_number << "\n";
-                current_output_line++;
-            }
-        }   
-        output_file << "JZERO 2" << "\n";
+        output_file << "SUB " << AUX_REGISTER1 << "\n";
         current_output_line++;
     }
+    else if (right->type == ARRAY) {
+        if(right->is_pointer){
+            output_file << "LOAD " << right->register_number << "\n";
+        }
+        else{
+            output_file << "LOAD " << right->array_pointer << "\n";
+        }
+        if(right->is_index_variable_pointer){
+            output_file << "ADDI " << right->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << right->index_variable_register << "\n";
+        }
+        output_file << "LOADI 0" << "\n";
+        output_file << "SUB " << AUX_REGISTER1 << "\n";
+        current_output_line += 4;
+    }
+
+    output_file << "JZERO 2" << "\n";
+    current_output_line++;
 }
 
 /*******************NEQ CONDITION************************/
@@ -793,34 +1065,38 @@ void eq_condition::generate_code() {
 condition* create_neq_condition(struct variable* left, struct variable* right, int line_number){
 
     neq_condition* new_condition = new neq_condition(left, right);
-    new_condition->lines_taken = 2;
+
+    int lines_taken = 0;
+    
+    if(left->type == VALUE){
+        lines_taken+=2;
+    }
+    else if(left->type == VARIABLE){
+        lines_taken+=2;
+    }
+    else if(left->type == ARRAY){
+        lines_taken += 4;
+    }
+
+    if(right->type == VALUE){
+        lines_taken+=2;
+    }
+    else if(right->type == VARIABLE){
+        lines_taken+=2;
+    }
+    else if(right->type == ARRAY){
+        lines_taken += 4;
+    }
+
+    new_condition->lines_taken = lines_taken;
+
     new_condition->type = COND_NEQ;
 
-    if(left->type == VALUE){
-        if(left->val == 1){
-            is_used[0] = true;
-        }
-        else if(left->val == -1){
-            is_used[1] = true;
-        }
-        else if(left->val == 0){
-            is_used[2] = true;
-        }
+    if(left->is_initialized == false){
+        print_error("Variable " + left->name + " not initialized", line_number);
     }
-    else if(right->type == VALUE){
-        if(right->val == 1){
-            is_used[0] = true;
-        }
-        else if(right->val == -1){
-            is_used[1] = true;
-        }
-        else if(right->val == 0){
-            is_used[2] = true;
-        }
-    }
-
-    if(left->is_initialized == false || right->is_initialized == false){
-        print_error("Variable not initialized", line_number);
+    if(right->is_initialized == false){
+        print_error("Variable " + right->name + " not initialized", line_number);
     }
 
     return new_condition;
@@ -828,7 +1104,8 @@ condition* create_neq_condition(struct variable* left, struct variable* right, i
 
 
 void neq_condition::generate_code() {
-    if (left->type == VALUE && right->type != VALUE) {
+
+    if(left->type == VALUE){
         if(left->val == 1){
             output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
         }
@@ -842,20 +1119,40 @@ void neq_condition::generate_code() {
             output_file << "SET " << left->val << "\n";
         }
         current_output_line++;
-        if(right->is_pointer){
-            if(right->type == VARIABLE){
-                output_file << "SUBI " << right->register_number << "\n";
-                current_output_line++;
-            }
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line++;
+    }
+    else if(left->type == VARIABLE){
+        if(left->is_pointer){
+            output_file << "LOADI " << left->register_number << "\n";
+            current_output_line++;
         }
         else{
-            if(right->type == VARIABLE){
-                output_file << "SUB " << right->register_number << "\n";
-                current_output_line++;
-            }
+            output_file << "LOAD " << left->register_number << "\n";
+            current_output_line++;
         }
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line++;
     }
-    else if (left->type != VALUE && right->type == VALUE) {
+    else if(left->type == ARRAY){
+        if(left->is_pointer){
+            output_file << "LOAD " << left->register_number << "\n";
+        }
+        else{
+            output_file << "LOAD " << left->array_pointer << "\n";
+        }
+        if(left->is_index_variable_pointer){
+            output_file << "ADDI " << left->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << left->index_variable_register << "\n";
+        }
+        output_file << "LOADI 0" << "\n";
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line += 4;
+    }
+
+    if(right->type == VALUE){
         if(right->val == 1){
             output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
         }
@@ -869,54 +1166,37 @@ void neq_condition::generate_code() {
             output_file << "SET " << right->val << "\n";
         }
         current_output_line++;
-        if(left->is_pointer){
-            if(left->type == VARIABLE){
-                output_file << "SUBI " << left->register_number << "\n";
-                current_output_line++;
-            }
-        }
-        else{
-            if(left->type == VARIABLE){
-                output_file << "SUB " << left->register_number << "\n";
-                current_output_line++;
-            }
-        }
+        output_file << "SUB " << AUX_REGISTER1 << "\n";
+        current_output_line++;
     }
-    else if (left->is_pointer){
-        if(left->type == VARIABLE){
-            output_file << "LOADI " << left->register_number << "\n";
+    else if(right->type == VARIABLE){
+        if(right->is_pointer){
+            output_file << "LOADI " << right->register_number << "\n";
             current_output_line++;
         }
-        if(right->is_pointer){
-            if(right->type == VARIABLE){
-                output_file << "SUBI " << right->register_number << "\n";
-                current_output_line++;
-            }
-        }
         else{
-            if(right->type == VARIABLE){
-                output_file << "SUB " << right->register_number << "\n";
-                current_output_line++;
-            }
-        }
-    }
-    else{
-        if(left->type == VARIABLE){
-            output_file << "LOAD " << left->register_number << "\n";
+            output_file << "LOAD " << right->register_number << "\n";
             current_output_line++;
         }
+        output_file << "SUB " << AUX_REGISTER1 << "\n";
+        current_output_line++;
+    }
+    else if(right->type == ARRAY){
         if(right->is_pointer){
-            if(right->type == VARIABLE){
-                output_file << "SUBI " << right->register_number << "\n";
-                current_output_line++;
-            }
+            output_file << "LOAD " << right->register_number << "\n";
         }
         else{
-            if(right->type == VARIABLE){
-                output_file << "SUB " << right->register_number << "\n";
-                current_output_line++;
-            }
-        }   
+            output_file << "LOAD " << right->array_pointer << "\n";
+        }
+        if(right->is_index_variable_pointer){
+            output_file << "ADDI " << right->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << right->index_variable_register << "\n";
+        }
+        output_file << "LOADI 0" << "\n";
+        output_file << "SUB " << AUX_REGISTER1 << "\n";
+        current_output_line += 4;
     }
 }
 
@@ -925,70 +1205,58 @@ void neq_condition::generate_code() {
 condition* create_lt_condition(struct variable* left, struct variable* right, int line_number){
 
     lt_condition* new_condition = new lt_condition(left, right);
-    new_condition->lines_taken = 3;
-    new_condition->type = COND_LT;
+    
+    int lines_taken = 1;
 
     if(left->type == VALUE){
-        if(left->val == 1){
-            is_used[0] = true;
-        }
-        else if(left->val == -1){
-            is_used[1] = true;
-        }
-        else if(left->val == 0){
-            is_used[2] = true;
-        }
+        lines_taken+=2;
     }
-    else if(right->type == VALUE){
-        if(right->val == 1){
-            is_used[0] = true;
-        }
-        else if(right->val == -1){
-            is_used[1] = true;
-        }
-        else if(right->val == 0){
-            is_used[2] = true;
-        }
+    else if(left->type == VARIABLE){
+        lines_taken+=2;
+    }
+    else if(left->type == ARRAY){
+        lines_taken += 4;
     }
 
-    if(left->is_initialized == false || right->is_initialized == false){
-        print_error("Variable not initialized", line_number);
+    if(right->type == VALUE){
+        lines_taken+=2;
+    }
+    else if(right->type == VARIABLE){
+        lines_taken+=2;
+    }
+    else if(right->type == ARRAY){
+        lines_taken += 4;
+    }
+
+    new_condition->lines_taken = lines_taken;
+
+    new_condition->type = COND_LT;
+
+    if(left->is_initialized == false){
+        print_error("Variable " + left->name + " not initialized", line_number);
+    }
+    if(right->is_initialized == false){
+        print_error("Variable " + right->name + " not initialized", line_number);
     }
 
     return new_condition;
 }
 
 void lt_condition::generate_code(void){
-    if(left->type == VALUE && right->type != VALUE){
-        if(left->val == 1){
-            output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
-        }
-        else if(left->val == -1){
-            output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
-        }
-        else if(left->val == 0){
-            output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
-        }
-        else{
-            output_file << "SET " << left->val << "\n";
-        }
-        current_output_line++;
+    
+    if(right->type == VARIABLE){
         if(right->is_pointer){
-            if(right->type == VARIABLE){
-                output_file << "SUBI " << right->register_number << "\n";
-                current_output_line++;
-            }
+            output_file << "LOADI " << right->register_number << "\n";
+            current_output_line++;
         }
         else{
-            if(right->type == VARIABLE){
-                output_file << "SUB " << right->register_number << "\n";
-                current_output_line++;
-            }
+            output_file << "LOAD " << right->register_number << "\n";
+            current_output_line++;
         }
-        output_file << "JNEG 2" << "\n";
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
         current_output_line++;
     }
-    else if(left->type != VALUE && right->type == VALUE){
+    else if (right->type == VALUE){
         if(right->val == 1){
             output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
         }
@@ -1002,61 +1270,75 @@ void lt_condition::generate_code(void){
             output_file << "SET " << right->val << "\n";
         }
         current_output_line++;
-        if(left->is_pointer){
-            if(left->type == VARIABLE){
-                output_file << "SUBI " << left->register_number << "\n";
-                current_output_line++;
-            }
-        }
-        else{
-            if(left->type == VARIABLE){
-                output_file << "SUB " << left->register_number << "\n";
-                current_output_line++;
-            }
-        }
-        output_file << "JPOS 2" << "\n";
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
         current_output_line++;
     }
-    else if(left->is_pointer){
-        if(left->type == VARIABLE){
+    else if(right->type == ARRAY){
+        if(right->is_pointer){
+            output_file << "LOAD " << right->register_number << "\n";
+        }
+        else{
+            output_file << "LOAD " << right->array_pointer << "\n";
+        }
+        if(right->is_index_variable_pointer){
+            output_file << "ADDI " << right->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << right->index_variable_register << "\n";
+        }
+        output_file << "LOADI 0" << "\n";
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line += 4;
+    }
+
+    if(left->type == VARIABLE){
+        if(left->is_pointer){
             output_file << "LOADI " << left->register_number << "\n";
             current_output_line++;
         }
-        if(right->is_pointer){
-            if(right->type == VARIABLE){
-                output_file << "SUBI " << right->register_number << "\n";
-                current_output_line++;
-            }
-        }
         else{
-            if(right->type == VARIABLE){
-                output_file << "SUB " << right->register_number << "\n";
-                current_output_line++;
-            }
-        }
-        output_file << "JNEG 2" << "\n";
-        current_output_line++;
-    }
-    else{
-        if(left->type == VARIABLE){
             output_file << "LOAD " << left->register_number << "\n";
             current_output_line++;
         }
-        if(right->is_pointer){
-            if(right->type == VARIABLE){
-                output_file << "SUBI " << right->register_number << "\n";
-                current_output_line++;
-            }
-        }
-        else{
-            if(right->type == VARIABLE){
-                output_file << "SUB " << right->register_number << "\n";
-                current_output_line++;
-            }
-        }   
-        output_file << "JNEG 2" << "\n";
+        output_file << "SUB " << AUX_REGISTER1 << "\n";
         current_output_line++;
     }
+    else if (left->type == VALUE){
+        if(left->val == 1){
+            output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
+        }
+        else if(left->val == -1){
+            output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
+        }
+        else if(left->val == 0){
+            output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
+        }
+        else{
+            output_file << "SET " << left->val << "\n";
+        }
+        output_file << "SUB " << AUX_REGISTER1 << "\n";
+        current_output_line += 2;
+    }
+    else if(left->type == ARRAY){
+        if(left->is_pointer){
+            output_file << "LOAD " << left->register_number << "\n";
+        }
+        else{
+            output_file << "LOAD " << left->array_pointer << "\n";
+        }
+        if(left->is_index_variable_pointer){
+            output_file << "ADDI " << left->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << left->index_variable_register << "\n";
+        }
+        output_file << "LOADI 0" << "\n";
+        output_file << "SUB " << AUX_REGISTER1 << "\n";
+        current_output_line += 4;
+    }
+
+    output_file << "JNEG 2" << "\n";
+    current_output_line++;
 }
 
 /*******************LEQ CONDITION************************/
@@ -1064,68 +1346,58 @@ void lt_condition::generate_code(void){
 condition* create_leq_condition(struct variable* left, struct variable* right, int line_number){
 
     leq_condition* new_condition = new leq_condition(left, right);
-    new_condition->lines_taken = 2;
-    new_condition->type = COND_LEQ;
+    
+    int lines_taken = 0;
 
     if(left->type == VALUE){
-        if(left->val == 1){
-            is_used[0] = true;
-        }
-        else if(left->val == -1){
-            is_used[1] = true;
-        }
-        else if(left->val == 0){
-            is_used[2] = true;
-        }
+        lines_taken+=2;
     }
-    else if(right->type == VALUE){
-        if(right->val == 1){
-            is_used[0] = true;
-        }
-        else if(right->val == -1){
-            is_used[1] = true;
-        }
-        else if(right->val == 0){
-            is_used[2] = true;
-        }
+    else if(left->type == VARIABLE){
+        lines_taken+=2;
+    }
+    else if(left->type == ARRAY){
+        lines_taken += 4;
     }
 
-    if(left->is_initialized == false || right->is_initialized == false){
-        print_error("Variable not initialized", line_number);
+    if(right->type == VALUE){
+        lines_taken+=2;
+    }
+    else if(right->type == VARIABLE){
+        lines_taken+=2;
+    }
+    else if(right->type == ARRAY){
+        lines_taken += 4;
+    }
+
+    new_condition->lines_taken = lines_taken;
+
+    new_condition->type = COND_LEQ;
+
+    if(left->is_initialized == false){
+        print_error("Variable " + left->name + " not initialized", line_number);
+    }
+    if(right->is_initialized == false){
+        print_error("Variable " + right->name + " not initialized", line_number);
     }
 
     return new_condition;
 }
 
 void leq_condition::generate_code(void){
-    if(left->type == VALUE && right->type != VALUE){
-        if(left->val == 1){
-            output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
-        }
-        else if(left->val == -1){
-            output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
-        }
-        else if(left->val == 0){
-            output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
-        }
-        else{
-            output_file << "SET " << left->val << "\n";
-        }
-        current_output_line++;
+    
+    if(right->type == VARIABLE){
         if(right->is_pointer){
-            if(right->type == VARIABLE){
-                output_file << "SUBI " << right->register_number << "\n";
-                current_output_line++;
-            }
+            output_file << "LOADI " << right->register_number << "\n";
+            current_output_line++;
         }
         else{
-            if(right->type == VARIABLE){
-                output_file << "SUB " << right->register_number << "\n";
-                current_output_line++;
-            }
+            output_file << "LOAD " << right->register_number << "\n";
+            current_output_line++;
         }
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line++;
     }
-    else if(left->type != VALUE && right->type == VALUE){
+    else if (right->type == VALUE){
         if(right->val == 1){
             output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
         }
@@ -1139,55 +1411,71 @@ void leq_condition::generate_code(void){
             output_file << "SET " << right->val << "\n";
         }
         current_output_line++;
-        if(left->is_pointer){
-            if(left->type == VARIABLE){
-                output_file << "SUBI " << left->register_number << "\n";
-                current_output_line++;
-            }
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line++;
+    }
+    else if(right->type == ARRAY){
+        if(right->is_pointer){
+            output_file << "LOAD " << right->register_number << "\n";
         }
         else{
-            if(left->type == VARIABLE){
-                output_file << "SUB " << left->register_number << "\n";
-                current_output_line++;
-            }
+            output_file << "LOAD " << right->array_pointer<< "\n";
         }
+        if(right->is_index_variable_pointer){
+            output_file << "ADDI " << right->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << right->index_variable_register << "\n";
+        }
+        output_file << "LOADI 0" << "\n";
+        output_file << "STORE " << AUX_REGISTER1 << "\n";
+        current_output_line += 4;
     }
-    else if(left->is_pointer){
-        if(left->type == VARIABLE){
+
+    if(left->type == VARIABLE){
+        if(left->is_pointer){
             output_file << "LOADI " << left->register_number << "\n";
             current_output_line++;
         }
-        if(right->is_pointer){
-            if(right->type == VARIABLE){
-                output_file << "SUBI " << right->register_number << "\n";
-                current_output_line++;
-
-            }
-        }
         else{
-            if(right->type == VARIABLE){
-                output_file << "SUB " << right->register_number << "\n";
-                current_output_line++;
-            }
-        }
-    }
-    else{
-        if(left->type == VARIABLE){
             output_file << "LOAD " << left->register_number << "\n";
             current_output_line++;
         }
-        if(right->is_pointer){
-            if(right->type == VARIABLE){
-                output_file << "SUBI " << right->register_number << "\n";
-                current_output_line++;
-            }
+        output_file << "SUB " << AUX_REGISTER1 << "\n";
+        current_output_line++;
+    }
+    else if (left->type == VALUE){
+        if(left->val == 1){
+            output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
+        }
+        else if(left->val == -1){
+            output_file << "LOAD " << CONST_MINUS_ONE_REGISTER << "\n";
+        }
+        else if(left->val == 0){
+            output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
         }
         else{
-            if(right->type == VARIABLE){
-                output_file << "SUB " << right->register_number << "\n";
-                current_output_line++;
-            }
-        }   
+            output_file << "SET " << left->val << "\n";
+        }
+        output_file << "SUB " << AUX_REGISTER1 << "\n";
+        current_output_line += 2;
+    }
+    else if(left->type == ARRAY){
+        if(left->is_pointer){
+            output_file << "LOAD " << left->register_number << "\n";
+        }
+        else{
+            output_file << "LOAD " << left->array_pointer << "\n";
+        }
+        if(left->is_index_variable_pointer){
+            output_file << "ADDI " << left->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << left->index_variable_register << "\n";
+        }
+        output_file << "LOADI 0" << "\n";
+        output_file << "SUB " << AUX_REGISTER1 << "\n";
+        current_output_line += 4;
     }
 }
 
@@ -1294,14 +1582,8 @@ void if_statement::generate_code() {
         current_output_line++;
     }
     else if(condition->type == COND_LEQ){
-        if(condition->left->type == VARIABLE && condition->right->type == VALUE){
-            output_file << "JNEG " << lines_taken - condition->lines_taken << "\n";
-            current_output_line++;
-        }
-        else {
-            output_file << "JPOS " << lines_taken - condition->lines_taken << "\n";
-            current_output_line++;
-        }
+        output_file << "JPOS " << lines_taken - condition->lines_taken << "\n";
+        current_output_line++;
     }
     for(command* command : *commands){
         command->generate_code();
@@ -1436,14 +1718,8 @@ void if_else_statement::generate_code() {
         current_output_line++;
     }
     else if(condition->type == COND_LEQ){
-        if(condition->left->type == VARIABLE && condition->right->type == VALUE){
-            output_file << "JNEG " << if_lines_taken + 2 << "\n";
-            current_output_line++;
-        }
-        else {
-            output_file << "JPOS " << if_lines_taken + 2 << "\n";
-            current_output_line++;
-        }
+        output_file << "JPOS " << if_lines_taken + 2 << "\n";
+        current_output_line++;
     }
     for(command* command : *if_commands){
         command->generate_code();
@@ -1516,7 +1792,7 @@ void while_statement::generate_code() {
                 for(command* command : *commands){
                     command->generate_code();
                 }
-                output_file << "JUMP -" << lines_taken - 2 << "\n";
+                output_file << "JUMP -" << lines_taken - 1 << "\n";
                 current_output_line++;
             }
         }
@@ -1525,7 +1801,7 @@ void while_statement::generate_code() {
                 for(command* command : *commands){
                     command->generate_code();
                 }
-                output_file << "JUMP -" << lines_taken - 2 << "\n";
+                output_file << "JUMP -" << lines_taken - 1 << "\n";
                 current_output_line++;
             }
         }
@@ -1534,7 +1810,7 @@ void while_statement::generate_code() {
                 for(command* command : *commands){
                     command->generate_code();
                 }
-                output_file << "JUMP -" << lines_taken - 2 << "\n";
+                output_file << "JUMP -" << lines_taken - 1 << "\n";
                 current_output_line++;
             }
         }
@@ -1543,7 +1819,7 @@ void while_statement::generate_code() {
                 for(command* command : *commands){
                     command->generate_code();
                 }
-                output_file << "JUMP -" << lines_taken - 2 << "\n";
+                output_file << "JUMP -" << lines_taken - 1 << "\n";
                 current_output_line++;
             }
         }
@@ -1565,14 +1841,8 @@ void while_statement::generate_code() {
         current_output_line++;
     }
     else if(condition->type == COND_LEQ){
-        if(condition->left->type != VALUE && condition->right->type == VALUE){
-            output_file << "JNEG " << lines_taken - condition->lines_taken << "\n";
-            current_output_line++;
-        }
-        else {
-            output_file << "JPOS " << lines_taken - condition->lines_taken << "\n";
-            current_output_line++;
-        }
+        output_file << "JPOS " << lines_taken - condition->lines_taken << "\n";
+        current_output_line++;
     }
     for(command* command : *commands){
         command->generate_code();
@@ -1622,16 +1892,9 @@ void repeat_until_statement::generate_code() {
         current_output_line++;
     }
     else if(condition->type == COND_LEQ){
-        if(condition->left->type != VALUE && condition->right->type == VALUE){
-            output_file << "JNEG -" << lines_taken - 1 << "\n";
-            current_output_line++;
-        }
-        else {
-            output_file << "JPOS -" << lines_taken - 1 << "\n";
-            current_output_line++;
-        }
+        output_file << "JPOS -" << lines_taken - 1 << "\n";
+        current_output_line++;
     }
-
 }
 
 /******************FOR***********************************/
@@ -1661,27 +1924,20 @@ command* create_for_statement(struct variable* iterator, struct variable* start,
 
     is_used[0] = true;
 
-    if(start->type == VALUE){
-        if(start->val == -1){
-            is_used[1] = true;
-        }
-        else if(start->val == 0){
-            is_used[2] = true;
-        }
-    }
-    if(end->type == VALUE){
-        if(end->val == -1){
-            is_used[1] = true;
-        }
-        else if(end->val == 0){
-            is_used[2] = true;
-        }
-    }
+    
     int lines_taken = 0;
     for(command* command : *commands){
         lines_taken += command->lines_taken;
     }
     new_for->lines_taken = lines_taken + 11;
+
+    if(end->type == ARRAY){
+        new_for->lines_taken += 2;
+    }
+
+    if(start->type == ARRAY){
+        new_for->lines_taken += 2;
+    }
 
     current_table->remove_symbol(iterator->name);
 
@@ -1705,17 +1961,31 @@ void for_statement::generate_code(void){
         }
         current_output_line++;
     }
-    else if(start->is_pointer){
-        if(start->type == VARIABLE){
+    else if (start->type == VARIABLE){
+        if(start->is_pointer){
             output_file << "LOADI " << start->register_number << "\n";
             current_output_line++;
         }
-    }
-    else{
-        if(start->type == VARIABLE){
+        else{
             output_file << "LOAD " << start->register_number << "\n";
             current_output_line++;
         }
+    }
+    else if(start->type == ARRAY){
+        if(start->is_pointer){
+            output_file << "LOAD " << start->register_number << "\n";
+        }
+        else{
+            output_file << "LOAD " << start->array_pointer << "\n";
+        }
+        if(start->is_index_variable_pointer){
+            output_file << "ADDI " << start->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << start->index_variable_register << "\n";
+        }
+        output_file << "LOADI 0" << "\n";
+        current_output_line += 3;
     }
     output_file << "STORE " << iterator->register_number << "\n";
     current_output_line++;
@@ -1731,31 +2001,55 @@ void for_statement::generate_code(void){
             output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
         }
         else{
-            output_file << "SET " << start->val << "\n";
+            output_file << "SET " << end->val << "\n";
         }
         current_output_line++;
     }
-    else if(end->is_pointer){
-        if(end->type == VARIABLE){
+    else if (end->type == VARIABLE){
+        if(end->is_pointer){
             output_file << "LOADI " << end->register_number << "\n";
             current_output_line++;
         }
-    }
-    else{
-        if(end->type == VARIABLE){
+        else{
             output_file << "LOAD " << end->register_number << "\n";
             current_output_line++;
         }
+    }
+    else if(end->type == ARRAY){
+        if(end->is_pointer){
+            output_file << "LOAD " << end->register_number << "\n";
+        }
+        else{
+            output_file << "LOAD " << end->array_pointer << "\n";
+        }
+        if(end->is_index_variable_pointer){
+            output_file << "ADDI " << end->index_variable_register << "\n";
+        }
+        else{
+            output_file << "ADD " << end->index_variable_register << "\n";
+        }
+        output_file << "LOADI 0" << "\n";
+        current_output_line += 3;
     }
 
     output_file << "STORE " << end_register << "\n";
     current_output_line++;
 
+    int jump_offset = 6;
+
+    if(end->type == ARRAY){
+        jump_offset += 2;
+    }
+
+    if(start->type == ARRAY){
+        jump_offset += 2;
+    }
+
     if(direction == UP){
         
         output_file << "LOAD " << end_register << "\n";
         output_file << "SUB " << iterator->register_number << "\n";
-        output_file << "JNEG " << lines_taken - 6 << "\n";
+        output_file << "JNEG " << lines_taken - jump_offset << "\n";
         current_output_line+=3;
 
     }
@@ -1763,7 +2057,7 @@ void for_statement::generate_code(void){
 
         output_file << "LOAD " << end_register << "\n";
         output_file << "SUB " << iterator->register_number << "\n";
-        output_file << "JPOS " << lines_taken - 6 << "\n";
+        output_file << "JPOS " << lines_taken - jump_offset << "\n";
         current_output_line+=3;
     }
 
@@ -1775,14 +2069,14 @@ void for_statement::generate_code(void){
         output_file << "LOAD " << iterator->register_number << "\n";
         output_file << "ADD " << CONST_ONE_REGISTER << "\n";
         output_file << "STORE " << iterator->register_number << "\n";
-        output_file << "JUMP -" << lines_taken - 5 << "\n";
+        output_file << "JUMP -" << lines_taken - jump_offset + 1 << "\n";
         current_output_line+=4;
     }
     else if(direction == DOWN){
         output_file << "LOAD " << iterator->register_number << "\n";
         output_file << "SUB " << CONST_ONE_REGISTER << "\n";
         output_file << "STORE " << iterator->register_number << "\n";
-        output_file << "JUMP -" << lines_taken - 5 << "\n";
+        output_file << "JUMP -" << lines_taken - jump_offset + 1 << "\n";
         current_output_line+=4;
     }
 }
@@ -1843,6 +2137,68 @@ struct variable* create_variable(std::string name, int line_number) {
     return new_variable;
 }
 
+struct variable* create_array_variable(std::string name, long long int index, int line_number) {
+    if(current_table->get_symbol(name) == nullptr){
+        print_error("Variable " + name + " not declared", line_number);
+        return nullptr;
+    }
+    variable* new_variable = new variable();
+
+    Symbol* symbol = current_table->get_symbol(name);
+
+    if(symbol->type == VARIABLE){
+        print_error("Variable " + name + " is not an array", line_number);
+        return nullptr;
+    }
+
+    if(index < symbol->start_index || index > symbol->end_index){
+        print_error("Index out of bounds", line_number);
+    }
+
+    new_variable->name = name;
+    new_variable->type = VARIABLE;
+    new_variable->register_number = symbol->offset + index;
+    new_variable->is_initialized = symbol->is_initialized;
+    new_variable->is_iterator = false;
+    new_variable->is_pointer = symbol->is_pointer;
+    return new_variable;
+}
+
+struct variable* create_array_variable(std::string name, std::string index_variable, int line_number) {
+    if(current_table->get_symbol(name) == nullptr){
+        print_error("Variable " + name + " not declared", line_number);
+        return nullptr;
+    }
+    if(current_table->get_symbol(index_variable) == nullptr){
+        print_error("Variable " + index_variable + " not declared", line_number);
+        return nullptr;
+    }
+    variable* new_variable = new variable();
+
+    Symbol* symbol = current_table->get_symbol(name);
+    Symbol* index_symbol = current_table->get_symbol(index_variable);
+
+
+    if(symbol->type != ARRAY){
+        print_error("Variable " + name + " is not an array", line_number);
+        return nullptr;
+    }
+
+    if(index_symbol->is_initialized == false){
+        print_error("Variable " + index_variable + " not initialized", line_number);
+    }
+
+    new_variable->name = name;
+    new_variable->type = ARRAY;
+    new_variable->register_number = symbol->offset;
+    new_variable->is_initialized = true;
+    new_variable->is_iterator = false;
+    new_variable->is_pointer = symbol->is_pointer;
+    new_variable->index_variable_register = index_symbol->offset;
+    new_variable->is_index_variable_pointer = index_symbol->is_pointer;
+    new_variable->array_pointer = symbol->array_pointer;
+    return new_variable;
+}
 /************************FORMAL PARAMETERS*************************************/
 
 std::vector<formal_parameter*> *create_parameters(std::string name, var_type_t type, int line_number) {
@@ -1922,7 +2278,6 @@ procedure* initialize_procedure(std::string name, std::vector<formal_parameter*>
     new_procedure->return_position = user_registers;
     user_registers -= 1;
 
-    procedures.push_back(new_procedure);
     return new_procedure;
 }
 
@@ -1950,7 +2305,9 @@ void create_procedure(procedure* new_procedure, std::vector<command*> *commands,
         offset += procedure->lines_taken;
     }
 
-    new_procedure->begining_line = offset + 1 - new_procedure->lines_taken;
+    new_procedure->begining_line = offset + 1;
+
+    procedures.push_back(new_procedure);
 
     current_table = nullptr;
 }
@@ -2019,6 +2376,10 @@ command* create_procedure_call(std::string name, std::vector<std::string> *param
 
         parameter->is_initialized = true;
 
+        if(parameter->type == ARRAY){
+            new_parameter->array_pointer = parameter->array_pointer;
+        }
+
         params->push_back(new_parameter);
 
     }
@@ -2043,24 +2404,87 @@ void procedure_call::generate_code(void) {
                 output_file << "LOAD " << params->at(i)->register_number << "\n";
                 current_output_line++;
             }
+            else if(params->at(i)->type == ARRAY){
+                output_file << "LOAD " << params->at(i)->array_pointer << "\n";
+                current_output_line++;
+            }
         }
         else{
             if(params->at(i)->type == VARIABLE){
                 output_file << "SET " << params->at(i)->register_number << "\n";
                 current_output_line++;
             }
+            else if(params->at(i)->type == ARRAY){
+                output_file << "LOAD " << params->at(i)->array_pointer << "\n";
+                current_output_line++;
+            }
         }
         output_file << "STORE " << proc->parameters->at(i)->register_number << "\n";
         current_output_line++;
     }
-    output_file << "SET " << current_output_line + 3 << "\n";
+    output_file << "SET " << current_output_line + 2 << "\n";
     output_file << "STORE " << proc->return_position << "\n";
     current_output_line += 2;
-    output_file << "JUMP " << proc->begining_line - current_output_line - 1 << "\n";
+    output_file << "JUMP " << proc->begining_line - current_output_line << "\n";
     current_output_line++;
 }
 
 /********************************COMPILER*****************************************/
+
+void generate_multiplication(void){
+
+    output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
+    output_file << "STORE " << AUX_REGISTER3 << "\n";
+    output_file << "STORE " << AUX_REGISTER5 << "\n";
+    output_file << "LOAD " << AUX_REGISTER2 << "\n";
+    output_file << "JPOS 13" << "\n";
+    output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
+    output_file << "SUB " << AUX_REGISTER2 << "\n";
+    output_file << "STORE " << AUX_REGISTER2 << "\n";
+    output_file << "LOAD " << AUX_REGISTER1 << "\n";
+    output_file << "JNEG 4" << "\n";
+    output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
+    output_file << "STORE " << AUX_REGISTER5 << "\n";
+    output_file << "JUMP 4" << "\n";
+    output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
+    output_file << "SUB " << AUX_REGISTER1 << "\n";
+    output_file << "STORE " << AUX_REGISTER1 << "\n";
+    output_file << "JUMP 8" << "\n";
+    output_file << "LOAD " << AUX_REGISTER1 << "\n";
+    output_file << "JPOS 6" << "\n";
+    output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
+    output_file << "SUB " << AUX_REGISTER1 << "\n";
+    output_file << "STORE " << AUX_REGISTER1 << "\n";
+    output_file << "LOAD " << CONST_ONE_REGISTER << "\n";
+    output_file << "STORE " << AUX_REGISTER5 << "\n";
+    output_file << "LOAD " << AUX_REGISTER1 << "\n";
+    output_file << "JPOS 2" << "\n";
+    output_file << "JUMP 15" << "\n";
+    output_file << "HALF" << "\n";
+    output_file << "ADD 0" << "\n";
+    output_file << "SUB " << AUX_REGISTER1 << "\n";
+    output_file << "JZERO 4" << "\n";
+    output_file << "LOAD " << AUX_REGISTER3 << "\n";
+    output_file << "ADD " << AUX_REGISTER2 << "\n";
+    output_file << "STORE " << AUX_REGISTER3 << "\n";
+    output_file << "LOAD " << AUX_REGISTER2 << "\n";
+    output_file << "ADD " << AUX_REGISTER2 << "\n";
+    output_file << "STORE " << AUX_REGISTER2 << "\n";
+    output_file << "LOAD " << AUX_REGISTER1 << "\n";
+    output_file << "HALF" << "\n";
+    output_file << "STORE " << AUX_REGISTER1 << "\n";
+    output_file << "JUMP -15" << "\n";
+    output_file << "LOAD " << AUX_REGISTER5 << "\n";
+    output_file << "JZERO 4" << "\n";
+    output_file << "LOAD " << CONST_ZERO_REGISTER << "\n";
+    output_file << "SUB " << AUX_REGISTER3 << "\n";
+    output_file << "STORE " << AUX_REGISTER3 << "\n";
+    output_file << "LOAD " << AUX_REGISTER3 << "\n";
+    output_file << "RTRN " << AUX_REGISTER4 << "\n";
+    current_output_line += 48;
+}
+
+
 
 void generate_code(void) {
 
@@ -2082,6 +2506,8 @@ void generate_code(void) {
         for(procedure* procedure : procedures){
             procedure->begining_line += 2;
         }
+
+        multiplication_begining_line += 2;
     }
     if(is_used[1]){
         output_file << "SET -1 " << "\n";
@@ -2091,6 +2517,8 @@ void generate_code(void) {
         for(procedure* procedure : procedures){
             procedure->begining_line += 2;
         }
+
+        multiplication_begining_line += 2;
     }
     if(is_used[2]){
         output_file << "SET 0 " << "\n";
@@ -2100,10 +2528,35 @@ void generate_code(void) {
         for(procedure* procedure : procedures){
             procedure->begining_line += 2;
         }
+
+        multiplication_begining_line += 2;
+    }
+
+    for(Symbol* array : arrays){
+        output_file << "SET " << array->offset << "\n";
+        output_file << "STORE " << array->array_pointer << "\n";
+        current_output_line += 2;
+
+        for(procedure* procedure : procedures){
+            procedure->begining_line += 2;
+        }
+
+        multiplication_begining_line += 2;
+    }
+
+    if(is_multiplication){
+        procedure_lines += 48;
+        for(procedure* procedure : procedures){
+            procedure->begining_line += 48;
+        }
     }
 
     output_file << "JUMP " << procedure_lines + 1 << "\n";
     current_output_line++;
+
+    if(is_multiplication){
+        generate_multiplication();
+    }
 
     for(procedure* procedure : procedures){
         procedure->generate_code();
@@ -2153,20 +2606,26 @@ void initialize_variable(std::string name, int line_number) {
     }
 }
 
-void initialize_array(std::string name, int begining, int end, int line_number) {
+void initialize_array(std::string name, long long int begining, long long int end, int line_number) {
     if(current_table == nullptr){
         current_table = new SymbolTable();
     }
+    if(begining > end){
+        print_error("Invalid array bounds", line_number);
+    }
     if(current_table->get_symbol(name) == nullptr){
         long long int length = end - begining + 1;
-        Symbol* new_symbol = new Symbol(name, ARRAY, length, begining, end, get_register_counter() - begining);
+        Symbol* new_symbol = new Symbol(name, ARRAY, length + 1, begining, end, get_register_counter() - begining);
+        increment_register_counter(length + 1);
         new_symbol->is_initialized = false;
         new_symbol->is_pointer = false;
         new_symbol->is_iterator = false;
+        new_symbol->array_pointer = new_symbol->offset + new_symbol->end_index + 1;
         if(new_symbol->offset + new_symbol->length - 1 > user_registers){
             print_error("Out of registers", line_number);
         }
         current_table->add_symbol(new_symbol);
+        arrays.push_back(new_symbol);
     }
     else{
         print_error("Variable " + name + " already declared", line_number);
