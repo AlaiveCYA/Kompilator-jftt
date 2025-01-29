@@ -24,6 +24,7 @@ struct variable {
     long long int index_variable_register;
     bool is_index_variable_pointer;
     long long int array_pointer;
+    bool is_static_reference = false; 
 };
 
 typedef enum {
@@ -37,6 +38,12 @@ typedef enum {
     UP,
     DOWN,
 } for_direction_t;
+
+typedef enum {
+    MULT,
+    DIVISION,
+    NONE
+} operation_t;
 
 class formal_parameter {
 public:
@@ -200,6 +207,7 @@ class multiplication : public expression {
 public:
     multiplication(struct variable* left, struct variable* right);
 
+    bool is_repeated = false;
     void generate_code();
 };
 
@@ -207,6 +215,15 @@ class division : public expression {
 public:
     division(struct variable* left, struct variable* right);
 
+    bool is_repeated = false;
+    void generate_code();
+};
+
+class modulo : public expression {
+public:
+    modulo(struct variable* left, struct variable* right);
+
+    bool is_repeated = false;
     void generate_code();
 };
 

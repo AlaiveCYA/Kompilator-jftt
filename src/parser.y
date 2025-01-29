@@ -127,14 +127,14 @@ declarations:   declarations COMA pidentifier { initialize_variable(*$3, yylinen
         |   pidentifier { initialize_variable(*$1, yylineno); }
         |   pidentifier LBRACKET NUMBER COLON NUMBER RBRACKET { initialize_array(*$1, $3, $5, yylineno); }
 
-formal_parameters: 
+formal_parameters: { $$ = new std::vector<formal_parameter*>(); }
         |   formal_parameters COMA pidentifier { $$ = create_parameters($1, *$3, VARIABLE, yylineno); }
         |   pidentifier { $$ = create_parameters(*$1, VARIABLE, yylineno); }
         |   formal_parameters COMA T pidentifier { $$ = create_parameters($1, *$4, ARRAY, yylineno); }
         |   T pidentifier { $$ = create_parameters(*$2, ARRAY, yylineno); }
         ;
 
-actual_parameters:
+actual_parameters: { $$ = new std::vector<std::string>(); }
         |   actual_parameters COMA pidentifier { $$ = create_actual_parameters($1, *$3, yylineno); }
         |   pidentifier { $$ = create_actual_parameters(*$1, yylineno); }
         ;
@@ -143,8 +143,8 @@ expression: value { $$ = pass_variable_as_expression($1, yylineno); }
         |   value PLUS value { $$ = create_addition($1, $3, yylineno); }
         |   value MINUS value { $$ = create_subtraction($1, $3, yylineno); }
         |   value TIMES value { $$ = create_multiplication($1, $3, yylineno); }
-        |   value DIV value {}
-        |   value MOD value {}
+        |   value DIV value { $$ = create_division($1, $3, yylineno); }
+        |   value MOD value { $$ = create_modulo($1, $3, yylineno); }
         ;
 
 condition: value EQ value { $$ = create_eq_condition($1, $3, yylineno); }
@@ -170,13 +170,13 @@ identifier: pidentifier { $$ = create_variable(*$1, yylineno); }
 
 int main(int argc, char **argv) {
     if( argc != 3 ) {
-        std::cerr << "Prawidlowe wywolanie: ./kompilator plik_wejsciowy plik_wyjsciowy" << std::endl;
+        std::cerr << "Use: ./kompilator plik_wejsciowy plik_wyjsciowy" << std::endl;
         return 1;
     }
 
     yyin = fopen(argv[1], "r");
     if (yyin == NULL){
-        std::cout << "Plik nie istnieje" << std::endl;
+        std::cout << "File " + std::string(argv[1]) + " does not exist" << std::endl;
         return 1;
     }
 
