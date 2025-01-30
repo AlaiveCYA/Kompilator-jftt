@@ -67,6 +67,7 @@ public:
     std::vector<formal_parameter*> *parameters;
     long long int return_position;
     long long int begining_line;
+    bool is_called = false;
     void generate_code();
 
 };

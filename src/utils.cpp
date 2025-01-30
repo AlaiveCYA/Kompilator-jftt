@@ -6,15 +6,15 @@
 #include "utils.hpp"
 #include "symbol_table.hpp"
 
-#define AUX_REGISTER1 MAX_REGISTERS - 1 //MULARG1
-#define AUX_REGISTER2 MAX_REGISTERS - 2 //MULARG2
-#define AUX_REGISTER3 MAX_REGISTERS - 3 //RESULT, QUOTIENT
+#define AUX_REGISTER1 MAX_REGISTERS - 1 //MUL_ARG1 DIV_ARG1 MOD_ARG1 TEMP_STORAGE
+#define AUX_REGISTER2 MAX_REGISTERS - 2 //MUL_ARG2 DIV_ARG2 MOD_ARG2 TEMP_STORAGE2
+#define AUX_REGISTER3 MAX_REGISTERS - 3 //PRODUCT, QUOTIENT
 #define AUX_REGISTER4 MAX_REGISTERS - 4 //RTRN
-#define AUX_REGISTER5 MAX_REGISTERS - 5 //FLAG1 SIGN1
-#define AUX_REGISTER6 MAX_REGISTERS - 6 //REMINDER
-#define AUX_REGISTER7 MAX_REGISTERS - 7 //FLAG2 SIGN2
-#define AUX_REGISTER8 MAX_REGISTERS - 8 //TEMPB DIVISION
-#define AUX_REGISTER9 MAX_REGISTERS - 9 //POWER DIVISION
+#define AUX_REGISTER5 MAX_REGISTERS - 5 //SAME_SIGN_FLAG SIGN_ARG1
+#define AUX_REGISTER6 MAX_REGISTERS - 6 //REMAINDER
+#define AUX_REGISTER7 MAX_REGISTERS - 7 //SIGN_ARG2
+#define AUX_REGISTER8 MAX_REGISTERS - 8 //TEMP_B DIVISION MODULO
+#define AUX_REGISTER9 MAX_REGISTERS - 9 //POWER DIVISION MODULO
 
 #define CONST_ONE_REGISTER MAX_REGISTERS - 10
 #define CONST_MINUS_ONE_REGISTER MAX_REGISTERS - 11
@@ -3052,6 +3052,8 @@ command* create_procedure_call(std::string name, std::vector<std::string> *param
         print_error("Wrong number of arguments", line_number);
     }
 
+    called_procedure->is_called = true;
+
     std::vector<variable*> *params = new std::vector<variable*>();
     for(size_t i = 0; i < called_procedure->parameters->size(); i++){
         Symbol* parameter = current_table->get_symbol(parameters->at(i));
@@ -3115,7 +3117,7 @@ void procedure_call::generate_code(void) {
                 current_output_line++;
             }
             else if(params->at(i)->type == ARRAY){
-                output_file << "LOAD " << params->at(i)->array_pointer << "\n";
+                output_file << "LOAD " << params->at(i)->register_number << "\n";
                 current_output_line++;
             }
         }
@@ -3357,9 +3359,26 @@ void generate_code(void) {
 
     int procedure_lines = 0;
 
-    for(procedure* procedure : procedures){
-        procedure->begining_line++;
-        procedure_lines += procedure->lines_taken;
+    int procedure_not_used_lines = 0;
+
+    for(procedure* proc : procedures){
+        proc->begining_line++;
+
+        if(proc->is_called){
+            procedure_lines += proc->lines_taken;
+        }
+
+        procedure_not_used_lines = 0;
+        for(procedure* proc2 : procedures){
+            if(proc == proc2){
+                break;
+            }
+            if(!proc2->is_called){
+                procedure_not_used_lines += proc2->lines_taken;
+            }
+        }
+
+        proc->begining_line -= procedure_not_used_lines;
     }
 
 
@@ -3441,7 +3460,9 @@ void generate_code(void) {
     }
 
     for(procedure* procedure : procedures){
-        procedure->generate_code();
+        if(procedure->is_called){
+            procedure->generate_code();
+        }
     }
 
     for (command* command : global_commands) {
